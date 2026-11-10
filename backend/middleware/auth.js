@@ -1,31 +1,40 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const AppError = require('../utils/AppError');
+const config = require('../config');
+
+const signToken = (user) =>
+  jwt.sign({ id: user._id.toString(), role: user.role }, config.JWT_SECRET, { expiresIn: config.JWT_EXPIRES_IN });
+
+// Resolve a token to an active user, or null.
+const userFromToken = async (token) => {
+  if (!token) return null;
+  try {
+    const decoded = jwt.verify(token, config.JWT_SECRET);
+    return await User.findById(decoded.id);
+  } catch {
+    return null;
+  }
+};
 
 const protect = async (req, res, next) => {
-  let token;
+  const header = req.headers.authorization || '';
+  const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+  if (!token) return next(AppError.unauthorized('Not authorized, no token'));
 
-  if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
-    try {
-      token = req.headers.authorization.split(' ')[1];
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      req.user = await User.findById(decoded.id).select('-password');
-      next();
-    } catch (error) {
-      return res.status(401).json({ message: 'Not authorized, token failed' });
-    }
-  }
+  const user = await userFromToken(token);
+  // A valid signature for a deleted user must not pass.
+  if (!user) return next(AppError.unauthorized('Not authorized, token invalid or expired'));
 
-  if (!token) {
-    return res.status(401).json({ message: 'Not authorized, no token' });
-  }
+  req.user = user;
+  next();
 };
 
-const adminOnly = (req, res, next) => {
-  if (req.user && req.user.role === 'admin') {
-    next();
-  } else {
-    res.status(403).json({ message: 'Admin access only' });
-  }
+const requireRole = (...roles) => (req, res, next) => {
+  if (!req.user || !roles.includes(req.user.role)) return next(AppError.forbidden());
+  next();
 };
 
-module.exports = { protect, adminOnly };
+const adminOnly = requireRole('admin');
+
+module.exports = { protect, adminOnly, requireRole, signToken, userFromToken };

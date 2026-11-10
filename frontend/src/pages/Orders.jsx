@@ -1,85 +1,63 @@
-import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
-import API from '../api';
+import { useEffect, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import toast from 'react-hot-toast';
+import API, { errorMessage } from '../api';
+import { useCart } from '../context/CartContext';
+import { EmptyState, Loader } from '../components/ui';
+import { FALLBACK_RESTAURANT, formatDateTime, rupees, statusLabel } from '../lib/format';
 
 const Orders = () => {
-  const [orders, setOrders]   = useState([]);
+  const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
+  const { replaceCart } = useCart();
+  const navigate = useNavigate();
 
   useEffect(() => {
-    fetchOrders();
+    API.get('/orders/my')
+      .then(({ data }) => setOrders(data))
+      .catch((e) => toast.error(errorMessage(e)))
+      .finally(() => setLoading(false));
   }, []);
 
-  const fetchOrders = async () => {
-    try {
-      const { data } = await API.get('/orders/my');
-      setOrders(data);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
+  // Re-order: refill the cart with the same items (current prices apply at checkout).
+  const reorder = (order) => {
+    const restaurantId = order.restaurantId?._id || order.restaurantId;
+    replaceCart(restaurantId, order.restaurantName, order.items.map((i) => ({ ...i, _id: i.menuItemId })));
+    toast.success('Items added to your cart');
+    navigate('/cart');
   };
 
-  if (loading) return (
-    <div className="loader"><div className="spinner"></div></div>
-  );
+  if (loading) return <Loader />;
 
   return (
-    <div className="page-container" style={{ maxWidth: 700 }}>
+    <div className="page-container narrow">
       <h1 className="section-title">My Orders</h1>
-
       {orders.length === 0 ? (
-        <div className="empty-state">
-          <div className="emoji">📦</div>
-          <h3>No orders yet</h3>
+        <EmptyState emoji="📦" title="No orders yet">
           <p>Your past orders will appear here</p>
           <Link to="/" className="btn btn-primary" style={{ marginTop: 24 }}>Order Food</Link>
-        </div>
+        </EmptyState>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {orders.map(order => (
-            <Link
-              key={order._id}
-              to={`/order/${order._id}`}
-              style={{ textDecoration: 'none', color: 'inherit' }}
-            >
-              <div style={{
-                background: 'white', borderRadius: 16, padding: 20,
-                boxShadow: '0 2px 12px rgba(0,0,0,0.07)',
-                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                transition: 'box-shadow 0.2s',
-              }}>
-                <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
-                  <img
-                    src={order.restaurantId?.image || 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=200'}
-                    alt=""
-                    style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 12 }}
-                    onError={(e) => { e.target.src = 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=200'; }}
-                  />
-                  <div>
-                    <h4>{order.restaurantName}</h4>
-                    <p style={{ color: 'var(--gray)', fontSize: '0.85rem', margin: '4px 0' }}>
-                      {order.items?.length} items · ₹{order.finalAmount}
-                    </p>
-                    <p style={{ color: 'var(--gray)', fontSize: '0.8rem' }}>
-                      {new Date(order.createdAt).toLocaleDateString('en-IN', {
-                        day: 'numeric', month: 'short', year: 'numeric',
-                        hour: '2-digit', minute: '2-digit',
-                      })}
-                    </p>
-                  </div>
+        <div className="stack gap-16">
+          {orders.map((order) => (
+            <div key={order._id} className="panel order-row">
+              <Link to={`/order/${order._id}`} className="row gap-16 order-link">
+                <img src={order.restaurantId?.image || FALLBACK_RESTAURANT} alt="" onError={(e) => { e.currentTarget.src = FALLBACK_RESTAURANT; }} />
+                <div>
+                  <h4>{order.restaurantName}</h4>
+                  <p className="muted small">{order.items.map((i) => `${i.name} × ${i.quantity}`).join(', ')}</p>
+                  <p className="muted small">{formatDateTime(order.createdAt)} · {rupees(order.finalAmount)}</p>
                 </div>
-                <div style={{ textAlign: 'right' }}>
-                  <span className={`status-pill status-${order.orderStatus}`}>
-                    {order.orderStatus.replace('_', ' ')}
-                  </span>
-                  <p style={{ color: 'var(--primary)', fontSize: '0.85rem', marginTop: 8, fontWeight: 600 }}>
-                    Track Order →
-                  </p>
-                </div>
+              </Link>
+              <div className="order-actions">
+                <span className={`status-pill status-${order.orderStatus}`}>{statusLabel(order.orderStatus)}</span>
+                {['delivered', 'cancelled'].includes(order.orderStatus) ? (
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => reorder(order)}>↻ Reorder</button>
+                ) : (
+                  <Link to={`/order/${order._id}`} className="link bold small">Track →</Link>
+                )}
               </div>
-            </Link>
+            </div>
           ))}
         </div>
       )}

@@ -1,0 +1,9 @@
+{
+  "name": "HungryBirds",
+  "short_name": "HungryBirds",
+  "description": "Food delivery in Dharwad & Hubli",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FAFAFA",
+  "theme_color": "#FF4500"
+}

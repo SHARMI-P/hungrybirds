@@ -1,236 +1,201 @@
-# 🐦 HungryBirds - Food Delivery App
+# 🐦 HungryBirds — Food Delivery for Dharwad & Hubli
 
-A full-stack food delivery web application inspired by Swiggy, built for Dharwad and Hubli regions. Users can browse restaurants, order food, make payments, and track deliveries in real time.
+[![CI](https://github.com/SHARMI-P/hungrybirds/actions/workflows/ci.yml/badge.svg)](https://github.com/SHARMI-P/hungrybirds/actions/workflows/ci.yml)
 
----
+A full-stack, real-time food delivery platform with **three apps**: a customer app, a rider app and an admin dashboard. Customers order from local restaurants and pay with Razorpay or cash, then watch their rider move on a live map. Riders get orders assigned automatically to the nearest free rider. Admins run everything from an analytics dashboard.
 
-## 🌐 Live Demo
-
-| Platform | Link |
+| App | Link |
 |---|---|
-| 🍔 Customer App | [hungrybirds-gamma.vercel.app](https://hungrybirds-gamma.vercel.app) |
-| ⚙️ Admin Panel | [hbadmin.vercel.app](https://hbadmin.vercel.app) |
-| 🖥️ Backend API | [hungrybirds-backend.onrender.com](https://hungrybirds-backend.onrender.com) |
+| 🍔 Customer + 🛵 Rider app | [hungrybirds-gamma.vercel.app](https://hungrybirds-gamma.vercel.app) |
+| ⚙️ Admin panel | [hbadmin.vercel.app](https://hbadmin.vercel.app) |
+| 🖥️ API + Swagger docs | [hungrybirds-backend.onrender.com/api/docs](https://hungrybirds-backend.onrender.com/api/docs) |
+
+> The API runs on Render's free tier, so the first request after a while can take ~30 s while it wakes up.
+
+<!-- Add screenshots/GIF here: docs/screenshots/home.png, tracking.gif, admin.png -->
 
 ---
 
 ## ✨ Features
 
-### Customer App
-- 📍 Location-based restaurant discovery
-- 🍽️ Browse menus with photos and prices
-- 🛒 Add to cart and place orders
-- 💳 Razorpay payment integration
-- 📦 Real-time order tracking
-- 🔐 User authentication (Register / Login)
+### Customer
+- 📍 **Location-based discovery** — MongoDB `$geoNear` returns restaurants with distance, plus search, cuisine chips, pure-veg filter and sort by distance / rating / fee
+- 🧾 **Server-calculated bill** — distance-based delivery fee, GST, minimum order, coupons (`WELCOME50`, `HUNGRY20`…) and an ETA, priced live at checkout
+- 🗺️ **Address picker on an OpenStreetMap map** — GPS, search (Nominatim), drag the pin to the door, saved Home/Work addresses
+- 💳 **Razorpay** (signature verified + webhook) or **Cash on Delivery**; auto-refund when a paid order is cancelled
+- 📦 **Live tracking** — status timeline and the rider's position on a Leaflet map over Socket.io
+- ⭐ Ratings & reviews, order history, one-tap **reorder**, cancel before confirmation
 
-### Admin Panel
-- 🏪 Add and manage restaurants
-- 🍜 Add and manage menu items
-- 📋 View and manage all orders
-- 🚴 Manage delivery agents
-- 📊 Dashboard overview
+### Rider (log in with a rider account → `/rider`)
+- Go online/offline, share live GPS, see pickup & drop on a map with OpenStreetMap directions
+- Mark *picked up* / *delivered*; cash-to-collect shown for COD
+- 🧪 **Simulate ride** button to demo live tracking without moving
 
----
-
-## 🛠️ Tech Stack
-
-### Frontend
-- React.js
-- React Router
-- Axios
-- Context API (Auth + Cart)
-- CSS3
-
-### Backend
-- Node.js
-- Express.js
-- MongoDB Atlas
-- Mongoose
-- JWT Authentication
-- Socket.io (Real-time tracking)
-- Razorpay API
-- Cloudinary (Image uploads)
-
-### Deployment
-- Frontend → Vercel
-- Backend → Render
-- Database → MongoDB Atlas
-- Images → Cloudinary
+### Admin
+- 📊 **Dashboard** — revenue, orders per day, status breakdown, top dishes & restaurants (MongoDB aggregation + Recharts)
+- 📦 Orders with filters, pagination, **valid next-step buttons only**, manual rider (re)assignment, live 🔔 new-order alerts
+- 🏪 Restaurants & 🍽️ menus with **Cloudinary image upload**, sold-out toggle, edit in place
+- 🛵 Riders (creates their login too) · 🎟️ Coupons
 
 ---
 
-## 📁 Project Structure
+## 🏗️ Architecture
 
-```
-HungryBirds/
-├── frontend/          # React customer app (Port 3000)
-├── backend/           # Node.js + Express API (Port 5000)
-└── admin-panel/       # React admin dashboard (Port 3001)
+```mermaid
+flowchart LR
+  C[Customer / Rider app<br/>React + Vite + Leaflet] -- REST + JWT --> API
+  A[Admin panel<br/>React + Vite + Recharts] -- REST + JWT --> API
+  C <-- Socket.io (JWT) --> API
+  A <-- Socket.io (JWT) --> API
+  API[Express 5 API<br/>Zod · Helmet · rate limit] --> DB[(MongoDB Atlas<br/>2dsphere indexes)]
+  API --> RZ[Razorpay<br/>orders · refunds]
+  RZ -- webhook --> API
+  API --> CL[Cloudinary<br/>images]
+  C --> OSM[OpenStreetMap tiles<br/>+ Nominatim geocoding]
 ```
 
+**Order lifecycle** (enforced on the server by a state machine):
+
+```
+awaiting_payment ──► placed ──► confirmed ──► preparing ──► picked_up ──► delivered
+        │               │            │             │
+        └───────────────┴────────────┴─────────────┴──► cancelled (auto-refund if paid)
+```
+
+| Who | Can do |
+|---|---|
+| Customer | cancel while `placed` (or before paying) |
+| Admin | confirm, start preparing, cancel before pickup, assign riders |
+| Assigned rider | `picked_up`, `delivered` — only on their own order |
+
 ---
 
-## 🚀 Getting Started (Local Setup)
+## 🔐 Security decisions
 
-### Prerequisites
-- Node.js installed
-- MongoDB Atlas account
-- Razorpay account (test keys)
+- **The browser never sends prices.** It sends menu item IDs and quantities; the server looks up prices and computes fees, discount, GST and the total. The Razorpay order is created for that server-side amount.
+- **An order is only marked paid after HMAC verification**, either the checkout signature (`/payment/verify`, which also checks the payment belongs to *your* order) or a signed **Razorpay webhook**. Both paths are idempotent. Late payments on expired checkouts are refunded automatically.
+- **Authorization on every route**: an order is visible only to its owner, admins and the assigned rider (others get 404). Socket rooms use the same check and require a JWT.
+- **Zod validation** on every input, with unknown fields stripped. That blocks mass assignment (e.g. sending `role: "admin"` or `rating: 5`).
+- **Race-safe updates**: riders are claimed atomically, and status changes are conditional on the current status.
+- Helmet headers, CORS allow-list, rate limiting (stricter on login), bcrypt, `select: false` on password hashes, central error handler (no stack traces in production), secrets only via environment variables.
 
-### Step 1 — Clone the Repository
+---
+
+## 🛠️ Tech stack (all open source)
+
+| Layer | Tools |
+|---|---|
+| Frontend | React 19, Vite, React Router 7, Leaflet + react-leaflet (OpenStreetMap), Socket.io client, react-hot-toast |
+| Admin | React 19, Vite, Recharts |
+| Backend | Node 22, Express 5, Mongoose 8, Socket.io, Zod, Helmet, express-rate-limit, Multer, Swagger UI |
+| Services | MongoDB Atlas, Razorpay, Cloudinary, OpenStreetMap / Nominatim |
+| Quality | Jest + Supertest (real MongoDB), Vitest + Testing Library, ESLint, Prettier, GitHub Actions, Dependabot |
+| Deploy | Vercel (frontends), Render (API, `render.yaml`), Docker Compose (local) |
+
+---
+
+## 🚀 Run it locally
+
+**Prerequisites:** Node 20+ and either Docker or a MongoDB connection string (Atlas free tier works).
+
 ```bash
 git clone https://github.com/SHARMI-P/hungrybirds.git
 cd hungrybirds
 ```
 
-### Step 2 — Setup Backend
+### 1. API
+
 ```bash
 cd backend
+cp .env.example .env        # fill in MONGODB_URI and JWT_SECRET (Razorpay/Cloudinary optional)
 npm install
+npm run seed                # demo data — prints the admin password
+npm run dev                 # http://localhost:5000  ·  docs at /api/docs
 ```
 
-Create a `.env` file in the `backend` folder:
-```env
-PORT=5000
-MONGODB_URI=your_mongodb_uri
-JWT_SECRET=your_jwt_secret
-RAZORPAY_KEY_ID=your_razorpay_key
-RAZORPAY_KEY_SECRET=your_razorpay_secret
-GOOGLE_MAPS_API_KEY=your_google_maps_key
-CLOUDINARY_CLOUD_NAME=your_cloudinary_name
-CLOUDINARY_API_KEY=your_cloudinary_key
-CLOUDINARY_API_SECRET=your_cloudinary_secret
-```
+Or with Docker (MongoDB included):
 
-Seed the database:
 ```bash
-node seed.js
+docker compose up --build
+docker compose exec api node seed.js
 ```
 
-Start the backend:
-```bash
-npm run dev
-```
+### 2. Customer app
 
-### Step 3 — Setup Frontend
 ```bash
-cd ../frontend
+cd frontend
+cp .env.example .env        # VITE_API_URL=http://localhost:5000/api
 npm install
+npm run dev                 # http://localhost:3000
 ```
 
-Create a `.env` file in the `frontend` folder:
-```env
-REACT_APP_API_URL=http://localhost:5000/api
-REACT_APP_RAZORPAY_KEY_ID=your_razorpay_key
-REACT_APP_GOOGLE_MAPS_API_KEY=your_google_maps_key
-```
+### 3. Admin panel
 
-Start the frontend:
 ```bash
-npm start
-```
-
-### Step 4 — Setup Admin Panel
-```bash
-cd ../admin-panel
+cd admin-panel
+cp .env.example .env
 npm install
-npm start
+npm run dev                 # http://localhost:3001
 ```
 
----
-
-## 🔑 Test Credentials
+### Demo accounts (after `npm run seed`)
 
 | Role | Email | Password |
 |---|---|---|
-| Admin | admin@hungrybirds.com | admin123 |
-| Customer | test@test.com | test123 |
+| Customer | `test@test.com` | `Demo@12345` (or `SEED_DEMO_PASSWORD`) |
+| Rider | `raju@hb.com` (also priya@, suresh@, kavya@, mahesh@hb.com) | `Rider@12345` (or `SEED_RIDER_PASSWORD`) |
+| Admin | `admin@hungrybirds.com` | printed by the seed (or `SEED_ADMIN_PASSWORD`) |
+
+**Try the full flow:** order as the customer → confirm and start preparing in the admin panel → log in as the rider in another browser → *Picked up* → *Simulate ride*. The customer's map moves live.
+
+### Tests
+
+```bash
+cd backend && npm test         # 43 API tests against a real MongoDB (MONGO_TEST_URI, default localhost)
+cd frontend && npm test        # unit tests (Vitest)
+npm run lint                   # in any of the three apps
+```
 
 ---
 
-## 📱 Screenshots
+## 🔧 API overview
 
-### Customer App
-- Home page with restaurant listings
-- Restaurant menu page
-- Cart and checkout
-- Order tracking
+Interactive docs: **`/api/docs`** (OpenAPI 3 spec at `/api/openapi.json`).
 
-### Admin Panel
-- Dashboard
-- Restaurant management
-- Menu management
-- Order management
+| Area | Endpoints |
+|---|---|
+| Auth | `POST /auth/register` · `POST /auth/login` · `GET /auth/me` · `GET/POST/DELETE /auth/addresses` |
+| Restaurants | `GET /restaurants/nearby?lat&lng&q&cuisine&veg&sort` · `GET /restaurants/:id` · `/:id/reviews` · admin CRUD |
+| Menu | `GET /menu/:restaurantId` · admin CRUD |
+| Orders | `POST /orders/quote` · `POST /orders` · `GET /orders/my` · `GET /orders/:id` · `PUT /orders/:id/status` · `POST /orders/:id/cancel` · `POST /orders/:id/review` · admin `GET /orders`, `PUT /orders/:id/assign` |
+| Payment | `GET /payment/config` · `POST /payment/verify` · `POST /payment/webhook` |
+| Riders | `GET /agents/me` · `PUT /agents/me/status` · `PUT /agents/me/location` · admin CRUD |
+| Coupons | `GET /coupons` · admin CRUD |
+| Admin | `GET /admin/stats` · `POST /uploads` |
 
----
-
-## 🗺️ Restaurants Available
-
-### Dharwad
-- Hotel Shree Renuka
-- New Taj Hotel
-- Dharwad Pedha Sweet House
-- Hotel Adarsha
-- Udupi Krishna Bhavan
-- Sweet Cravings Dessert Cafe
-
-### Hubli
-- Hotel Ajanta
-- Tandoor Restaurant
-- Shahi Biryani Center
-- Comfort Zone Cafe
-- Hotel Dasaprakash
+**Socket.io:** connect with `io(URL, { auth: { token } })`, then `join_order`. Events: `order_status_update`, `agent_assigned`, `location_update`, `new_order` (admins), `order_assigned` (riders). Riders send `agent_location_update`.
 
 ---
 
-## 🔧 API Endpoints
+## ☁️ Deployment notes
 
-### Auth
-| Method | Endpoint | Description |
-|---|---|---|
-| POST | `/api/auth/register` | Register new user |
-| POST | `/api/auth/login` | Login user |
+- **Render (API):** root `backend`, start `npm start`, health check `/api/health`. Set `MONGODB_URI`, `JWT_SECRET`, `CLIENT_ORIGINS` (your two Vercel URLs), Razorpay and Cloudinary keys. `render.yaml` has a ready Blueprint.
+- **Razorpay webhook:** Dashboard → Webhooks → `https://<api>/api/payment/webhook`, events `payment.captured`, `payment.failed`, `order.paid`, and put the secret in `RAZORPAY_WEBHOOK_SECRET`.
+- **Vercel (both frontends):** root `frontend` / `admin-panel`, build `npm run build`, output `build` (`vercel.json` included). Set `VITE_API_URL` (the old `REACT_APP_API_URL` still works).
 
-### Restaurants
-| Method | Endpoint | Description |
-|---|---|---|
-| GET | `/api/restaurants/nearby` | Get nearby restaurants |
-| GET | `/api/restaurants/:id` | Get restaurant by ID |
-| POST | `/api/restaurants` | Add restaurant (Admin) |
+---
 
-### Menu
-| Method | Endpoint | Description |
-|---|---|---|
-| GET | `/api/menu/:restaurantId` | Get menu by restaurant |
-| POST | `/api/menu` | Add menu item (Admin) |
+## 🗺️ Roadmap
 
-### Orders
-| Method | Endpoint | Description |
-|---|---|---|
-| POST | `/api/orders` | Place order |
-| GET | `/api/orders/my` | Get my orders |
-| PUT | `/api/orders/:id` | Update order status (Admin) |
-
-### Payment
-| Method | Endpoint | Description |
-|---|---|---|
-| POST | `/api/payment/create-order` | Create Razorpay order |
-| POST | `/api/payment/verify` | Verify payment |
+- Restaurant-owner portal (accept/reject orders, sold-out toggles)
+- Push notifications (Web Push) and an installable PWA
+- Kannada / English UI
+- Road-based ETA with OSRM and Playwright end-to-end tests in CI
 
 ---
 
 ## 👩‍💻 Developer
 
-**Sharmi P**
-- GitHub: [@SHARMI-P](https://github.com/SHARMI-P)
+**Sharmi P** · GitHub [@SHARMI-P](https://github.com/SHARMI-P)
 
----
-
-## 📄 License
-
-This project is open source and available under the [MIT License](LICENSE).
-
----
-
-⭐ If you like this project, give it a star on GitHub!
+Licensed under the [MIT License](LICENSE).

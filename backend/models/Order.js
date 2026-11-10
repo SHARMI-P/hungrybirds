@@ -1,38 +1,66 @@
 const mongoose = require('mongoose');
 
-const orderItemSchema = new mongoose.Schema({
-  menuItemId:  { type: mongoose.Schema.Types.ObjectId, ref: 'MenuItem' },
-  name:        { type: String, required: true },
-  price:       { type: Number, required: true },
-  quantity:    { type: Number, required: true, min: 1 },
-  image:       { type: String, default: '' },
-});
+const ORDER_STATUSES = ['awaiting_payment', 'placed', 'confirmed', 'preparing', 'picked_up', 'delivered', 'cancelled'];
+const PAYMENT_STATUSES = ['pending', 'paid', 'failed', 'refund_pending', 'refunded'];
 
-const orderSchema = new mongoose.Schema({
-  userId:         { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  restaurantId:   { type: mongoose.Schema.Types.ObjectId, ref: 'Restaurant', required: true },
-  restaurantName: { type: String, required: true },
-  items:          [orderItemSchema],
-  subtotal:       { type: Number, required: true },
-  deliveryFee:    { type: Number, default: 30 },
-  discount:       { type: Number, default: 0 },
-  finalAmount:    { type: Number, required: true },
-  paymentStatus:  { type: String, enum: ['pending', 'paid', 'failed', 'refunded'], default: 'pending' },
-  paymentMethod:  { type: String, enum: ['razorpay', 'cod'], default: 'razorpay' },
-  razorpayOrderId: { type: String, default: '' },
-  razorpayPaymentId: { type: String, default: '' },
-  orderStatus: {
-    type: String,
-    enum: ['placed', 'confirmed', 'preparing', 'picked_up', 'delivered', 'cancelled'],
-    default: 'placed',
+const orderItemSchema = new mongoose.Schema(
+  {
+    menuItemId: { type: mongoose.Schema.Types.ObjectId, ref: 'MenuItem' },
+    name: { type: String, required: true },
+    price: { type: Number, required: true }, // price at time of order (from DB, never the client)
+    quantity: { type: Number, required: true, min: 1 },
+    image: { type: String, default: '' },
+    isVeg: { type: Boolean, default: true },
   },
-  deliveryAgentId: { type: mongoose.Schema.Types.ObjectId, ref: 'DeliveryAgent', default: null },
-  deliveryAddress: {
-    fullAddress: { type: String, required: true },
-    lat:         { type: Number, required: true },
-    lng:         { type: Number, required: true },
+  { _id: false },
+);
+
+const orderSchema = new mongoose.Schema(
+  {
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    restaurantId: { type: mongoose.Schema.Types.ObjectId, ref: 'Restaurant', required: true, index: true },
+    restaurantName: { type: String, required: true },
+    items: [orderItemSchema],
+
+    // Bill — every number here is computed on the server.
+    subtotal: { type: Number, required: true },
+    discount: { type: Number, default: 0 },
+    couponCode: { type: String, default: '' },
+    deliveryFee: { type: Number, default: 0 },
+    tax: { type: Number, default: 0 }, // GST
+    finalAmount: { type: Number, required: true },
+    distanceKm: { type: Number, default: 0 },
+
+    paymentStatus: { type: String, enum: PAYMENT_STATUSES, default: 'pending' },
+    paymentMethod: { type: String, enum: ['razorpay', 'cod'], default: 'razorpay' },
+    razorpayOrderId: { type: String, index: { unique: true, sparse: true } },
+    razorpayPaymentId: { type: String, default: '' },
+    razorpayRefundId: { type: String, default: '' },
+
+    orderStatus: { type: String, enum: ORDER_STATUSES, default: 'placed', index: true },
+    statusHistory: [{ status: String, at: { type: Date, default: Date.now }, by: String, _id: false }],
+    cancelReason: { type: String, default: '' },
+
+    deliveryAgentId: { type: mongoose.Schema.Types.ObjectId, ref: 'DeliveryAgent', default: null },
+    deliveryAddress: {
+      fullAddress: { type: String, required: true },
+      lat: { type: Number, required: true },
+      lng: { type: Number, required: true },
+    },
+    estimatedDelivery: { type: String, default: '30-45 mins' },
+    deliveredAt: { type: Date },
+
+    review: {
+      rating: { type: Number, min: 1, max: 5 },
+      comment: { type: String, maxlength: 500 },
+      createdAt: { type: Date },
+    },
   },
-  estimatedDelivery: { type: String, default: '30-45 mins' },
-}, { timestamps: true });
+  { timestamps: true },
+);
+
+orderSchema.index({ createdAt: -1 });
 
 module.exports = mongoose.model('Order', orderSchema);
+module.exports.ORDER_STATUSES = ORDER_STATUSES;
+module.exports.PAYMENT_STATUSES = PAYMENT_STATUSES;

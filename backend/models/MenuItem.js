@@ -1,10 +1,10 @@
 const mongoose = require('mongoose');
 
 const menuItemSchema = new mongoose.Schema({
-  restaurantId: { type: mongoose.Schema.Types.ObjectId, ref: 'Restaurant', required: true },
+  restaurantId: { type: mongoose.Schema.Types.ObjectId, ref: 'Restaurant', required: true, index: true },
   name:         { type: String, required: true, trim: true },
   description:  { type: String, default: '' },
-  price:        { type: Number, required: true },
+  price:        { type: Number, required: true, min: 0 },
   image:        { type: String, default: '' },   // Cloudinary URL
   category:     { type: String, required: true }, // e.g. 'Starters', 'Main Course', 'Desserts'
   isVeg:        { type: Boolean, default: true },

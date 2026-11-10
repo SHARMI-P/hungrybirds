@@ -1,0 +1,588 @@
+openapi: 3.0.3
+info:
+  title: HungryBirds API
+  version: 2.0.0
+  description: |
+    Food delivery API for Dharwad & Hubli.
+
+    **Auth:** call `POST /auth/login`, copy the `token`, click **Authorize** and paste it.
+
+    **Money rule:** the client never sends prices. It sends menu item IDs and quantities;
+    the server computes subtotal, coupon discount, distance-based delivery fee, GST and total.
+
+    **Realtime (Socket.io):** connect with `io(BASE_URL, { auth: { token } })`, then
+    `emit('join_order', orderId, ack)`. Events: `order_status_update`, `agent_assigned`,
+    `location_update`; admins also get `new_order` / `order_updated`; riders get `order_assigned`
+    and send `agent_location_update {lat,lng}`.
+servers:
+  - url: /api
+tags:
+  - name: Auth
+  - name: Restaurants
+  - name: Menu
+  - name: Orders
+  - name: Payment
+  - name: Riders
+  - name: Coupons
+  - name: Admin
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, example: 65f1c2e4a1b2c3d4e5f60718 }
+  responses:
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+  schemas:
+    Error:
+      type: object
+      properties:
+        message: { type: string }
+        errors:
+          type: array
+          items: { type: object, properties: { field: { type: string }, message: { type: string } } }
+    AuthResponse:
+      type: object
+      properties:
+        _id: { type: string }
+        name: { type: string }
+        email: { type: string }
+        phone: { type: string }
+        role: { type: string, enum: [customer, admin, agent] }
+        addresses: { type: array, items: { $ref: '#/components/schemas/Address' } }
+        token: { type: string }
+    Address:
+      type: object
+      required: [fullAddress, lat, lng]
+      properties:
+        _id: { type: string }
+        label: { type: string, example: Home }
+        fullAddress: { type: string }
+        lat: { type: number }
+        lng: { type: number }
+    Restaurant:
+      type: object
+      properties:
+        _id: { type: string }
+        name: { type: string }
+        image: { type: string }
+        cuisine: { type: array, items: { type: string } }
+        address: { type: string }
+        location: { type: object, properties: { type: { type: string }, coordinates: { type: array, items: { type: number } } } }
+        rating: { type: number }
+        totalRatings: { type: integer }
+        deliveryTime: { type: string }
+        deliveryFee: { type: number }
+        minimumOrder: { type: number }
+        pureVeg: { type: boolean }
+        isOpen: { type: boolean }
+        offers: { type: array, items: { type: string } }
+        distanceKm: { type: number, description: Only on /nearby }
+    RestaurantInput:
+      type: object
+      required: [name, cuisine, address, lat, lng]
+      properties:
+        name: { type: string }
+        image: { type: string, format: uri }
+        cuisine: { type: array, items: { type: string } }
+        address: { type: string }
+        lat: { type: number }
+        lng: { type: number }
+        deliveryTime: { type: string }
+        prepTimeMins: { type: integer }
+        deliveryFee: { type: number }
+        minimumOrder: { type: number }
+        pureVeg: { type: boolean }
+        isOpen: { type: boolean }
+        offers: { type: array, items: { type: string } }
+    MenuItem:
+      type: object
+      properties:
+        _id: { type: string }
+        restaurantId: { type: string }
+        name: { type: string }
+        description: { type: string }
+        price: { type: number }
+        image: { type: string }
+        category: { type: string }
+        isVeg: { type: boolean }
+        isAvailable: { type: boolean }
+        isBestseller: { type: boolean }
+        offer: { type: string }
+    CartInput:
+      type: object
+      required: [restaurantId, items]
+      properties:
+        restaurantId: { type: string }
+        items:
+          type: array
+          items:
+            type: object
+            required: [menuItemId, quantity]
+            properties:
+              menuItemId: { type: string }
+              quantity: { type: integer, minimum: 1, maximum: 50 }
+        couponCode: { type: string, example: HUNGRY20 }
+    Quote:
+      type: object
+      properties:
+        restaurantId: { type: string }
+        restaurantName: { type: string }
+        items: { type: array, items: { type: object } }
+        subtotal: { type: number }
+        discount: { type: number }
+        couponCode: { type: string }
+        deliveryFee: { type: number }
+        tax: { type: number }
+        taxPercent: { type: number }
+        finalAmount: { type: number }
+        distanceKm: { type: number }
+        estimatedDelivery: { type: string }
+    Order:
+      type: object
+      properties:
+        _id: { type: string }
+        userId: { type: string }
+        restaurantId: { oneOf: [{ type: string }, { $ref: '#/components/schemas/Restaurant' }] }
+        restaurantName: { type: string }
+        items: { type: array, items: { type: object } }
+        subtotal: { type: number }
+        discount: { type: number }
+        couponCode: { type: string }
+        deliveryFee: { type: number }
+        tax: { type: number }
+        finalAmount: { type: number }
+        paymentMethod: { type: string, enum: [razorpay, cod] }
+        paymentStatus: { type: string, enum: [pending, paid, failed, refund_pending, refunded] }
+        orderStatus: { type: string, enum: [awaiting_payment, placed, confirmed, preparing, picked_up, delivered, cancelled] }
+        statusHistory: { type: array, items: { type: object, properties: { status: { type: string }, at: { type: string, format: date-time }, by: { type: string } } } }
+        deliveryAgentId: { type: object, nullable: true }
+        deliveryAddress: { $ref: '#/components/schemas/Address' }
+        estimatedDelivery: { type: string }
+        review: { type: object, properties: { rating: { type: integer }, comment: { type: string } } }
+    Agent:
+      type: object
+      properties:
+        _id: { type: string }
+        name: { type: string }
+        phone: { type: string }
+        email: { type: string }
+        vehicleType: { type: string, enum: [bike, scooter, bicycle] }
+        vehicleNumber: { type: string }
+        isOnline: { type: boolean }
+        isAvailable: { type: boolean }
+        currentLocation: { type: object, properties: { lat: { type: number }, lng: { type: number } } }
+        currentOrderId: { type: string, nullable: true }
+        rating: { type: number }
+        totalDeliveries: { type: integer }
+    Coupon:
+      type: object
+      properties:
+        code: { type: string }
+        description: { type: string }
+        type: { type: string, enum: [percent, flat] }
+        value: { type: number }
+        maxDiscount: { type: number }
+        minOrder: { type: number }
+        firstOrderOnly: { type: boolean }
+        restaurantId: { type: string, nullable: true }
+        expiresAt: { type: string, format: date-time, nullable: true }
+        isActive: { type: boolean }
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      responses: { '200': { description: OK } }
+
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Register a customer account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, phone, password]
+              properties:
+                name: { type: string }
+                email: { type: string, format: email }
+                phone: { type: string, example: '9876543210' }
+                password: { type: string, minLength: 8 }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/AuthResponse' } } } }
+        '400': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Log in (customer, admin or rider). Rate limited.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [email, password], properties: { email: { type: string }, password: { type: string } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AuthResponse' } } } }
+        '401': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Current user
+      security: [{ bearer: [] }]
+      responses: { '200': { description: OK }, '401': { $ref: '#/components/responses/Error' } }
+  /auth/addresses:
+    get:
+      tags: [Auth]
+      summary: Saved addresses
+      security: [{ bearer: [] }]
+      responses: { '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Address' } } } } } }
+    post:
+      tags: [Auth]
+      summary: Save an address (max 10)
+      security: [{ bearer: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Address' } } } }
+      responses: { '201': { description: Created } }
+  /auth/addresses/{addressId}:
+    delete:
+      tags: [Auth]
+      summary: Delete a saved address
+      security: [{ bearer: [] }]
+      parameters: [{ name: addressId, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: OK } }
+
+  /restaurants/nearby:
+    get:
+      tags: [Restaurants]
+      summary: Restaurants near a point, with filters (uses $geoNear)
+      parameters:
+        - { name: lat, in: query, required: true, schema: { type: number, example: 15.4589 } }
+        - { name: lng, in: query, required: true, schema: { type: number, example: 75.0078 } }
+        - { name: radius, in: query, schema: { type: integer, default: 10000, maximum: 50000 }, description: metres }
+        - { name: q, in: query, schema: { type: string }, description: name or cuisine search }
+        - { name: cuisine, in: query, schema: { type: string } }
+        - { name: veg, in: query, schema: { type: boolean }, description: pure-veg only }
+        - { name: minRating, in: query, schema: { type: number } }
+        - { name: openOnly, in: query, schema: { type: boolean, default: true } }
+        - { name: sort, in: query, schema: { type: string, enum: [distance, rating, deliveryFee] } }
+      responses: { '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Restaurant' } } } } } }
+  /restaurants:
+    get:
+      tags: [Restaurants]
+      summary: List restaurants
+      parameters: [{ name: q, in: query, schema: { type: string } }]
+      responses: { '200': { description: OK } }
+    post:
+      tags: [Restaurants]
+      summary: Create restaurant (admin)
+      security: [{ bearer: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/RestaurantInput' } } } }
+      responses: { '201': { description: Created }, '403': { $ref: '#/components/responses/Error' } }
+  /restaurants/cuisines:
+    get:
+      tags: [Restaurants]
+      summary: Distinct cuisines (for filter chips)
+      responses: { '200': { description: OK } }
+  /restaurants/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Restaurants]
+      summary: Restaurant details
+      responses: { '200': { description: OK }, '404': { $ref: '#/components/responses/Error' } }
+    put:
+      tags: [Restaurants]
+      summary: Update restaurant (admin, partial)
+      security: [{ bearer: [] }]
+      requestBody: { content: { application/json: { schema: { $ref: '#/components/schemas/RestaurantInput' } } } }
+      responses: { '200': { description: OK } }
+    delete:
+      tags: [Restaurants]
+      summary: Delete restaurant and its menu (admin)
+      security: [{ bearer: [] }]
+      responses: { '200': { description: OK } }
+  /restaurants/{id}/reviews:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Restaurants]
+      summary: Latest customer reviews
+      responses: { '200': { description: OK } }
+
+  /menu/{restaurantId}:
+    get:
+      tags: [Menu]
+      summary: Menu grouped by category
+      parameters:
+        - { name: restaurantId, in: path, required: true, schema: { type: string } }
+        - { name: all, in: query, schema: { type: boolean }, description: include sold-out items }
+      responses: { '200': { description: OK } }
+  /menu:
+    post:
+      tags: [Menu]
+      summary: Add menu item (admin)
+      security: [{ bearer: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/MenuItem' } } } }
+      responses: { '201': { description: Created } }
+  /menu/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    put:
+      tags: [Menu]
+      summary: Update menu item (admin), e.g. mark sold out
+      security: [{ bearer: [] }]
+      requestBody: { content: { application/json: { schema: { $ref: '#/components/schemas/MenuItem' } } } }
+      responses: { '200': { description: OK } }
+    delete:
+      tags: [Menu]
+      summary: Delete menu item (admin)
+      security: [{ bearer: [] }]
+      responses: { '200': { description: OK } }
+
+  /orders/quote:
+    post:
+      tags: [Orders]
+      summary: Server-computed bill for a cart
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/CartInput'
+                - type: object
+                  properties: { deliveryLocation: { type: object, properties: { lat: { type: number }, lng: { type: number } } } }
+      responses: { '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Quote' } } } }, '400': { $ref: '#/components/responses/Error' } }
+  /orders:
+    post:
+      tags: [Orders]
+      summary: Place order. COD → placed immediately. Razorpay → awaiting_payment + Razorpay order details.
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/CartInput'
+                - type: object
+                  required: [paymentMethod, deliveryAddress]
+                  properties:
+                    paymentMethod: { type: string, enum: [razorpay, cod] }
+                    deliveryAddress: { $ref: '#/components/schemas/Address' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  order: { $ref: '#/components/schemas/Order' }
+                  payment: { type: object, properties: { key: { type: string }, orderId: { type: string }, amount: { type: integer }, currency: { type: string } } }
+    get:
+      tags: [Orders]
+      summary: All orders (admin), paginated
+      security: [{ bearer: [] }]
+      parameters:
+        - { name: status, in: query, schema: { type: string } }
+        - { name: page, in: query, schema: { type: integer } }
+        - { name: limit, in: query, schema: { type: integer } }
+      responses: { '200': { description: OK } }
+  /orders/my:
+    get:
+      tags: [Orders]
+      summary: My orders
+      security: [{ bearer: [] }]
+      responses: { '200': { description: OK } }
+  /orders/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Orders]
+      summary: Order details (owner, admin or assigned rider only)
+      security: [{ bearer: [] }]
+      responses: { '200': { description: OK }, '404': { $ref: '#/components/responses/Error' } }
+  /orders/{id}/status:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    put:
+      tags: [Orders]
+      summary: Change status (enforced state machine + role checks)
+      description: |
+        placed → confirmed → preparing → picked_up → delivered; cancel allowed before pickup.
+        Admin: any valid move. Customer: cancel before confirmation. Rider: picked_up / delivered on their own order.
+      security: [{ bearer: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [status], properties: { status: { type: string }, reason: { type: string } } } } } }
+      responses: { '200': { description: OK }, '400': { $ref: '#/components/responses/Error' }, '403': { $ref: '#/components/responses/Error' } }
+  /orders/{id}/cancel:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Orders]
+      summary: Cancel (auto-refund if paid online)
+      security: [{ bearer: [] }]
+      responses: { '200': { description: OK } }
+  /orders/{id}/assign:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    put:
+      tags: [Orders]
+      summary: Assign rider manually (admin)
+      security: [{ bearer: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { agentId: { type: string } } } } } }
+      responses: { '200': { description: OK } }
+  /orders/{id}/review:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [Orders]
+      summary: Rate a delivered order (once)
+      security: [{ bearer: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [rating], properties: { rating: { type: integer, minimum: 1, maximum: 5 }, comment: { type: string } } } } } }
+      responses: { '201': { description: Created } }
+
+  /payment/config:
+    get:
+      tags: [Payment]
+      summary: Whether online payment is enabled + public key
+      responses: { '200': { description: OK } }
+  /payment/verify:
+    post:
+      tags: [Payment]
+      summary: Verify Razorpay checkout signature and mark order paid
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [orderId, razorpay_order_id, razorpay_payment_id, razorpay_signature]
+              properties:
+                orderId: { type: string }
+                razorpay_order_id: { type: string }
+                razorpay_payment_id: { type: string }
+                razorpay_signature: { type: string }
+      responses: { '200': { description: OK }, '400': { $ref: '#/components/responses/Error' } }
+  /payment/webhook:
+    post:
+      tags: [Payment]
+      summary: Razorpay webhook (payment.captured, order.paid, payment.failed)
+      description: Verified with the X-Razorpay-Signature header and RAZORPAY_WEBHOOK_SECRET.
+      responses: { '200': { description: OK } }
+
+  /agents/me:
+    get:
+      tags: [Riders]
+      summary: Rider profile + current delivery
+      security: [{ bearer: [] }]
+      responses: { '200': { description: OK } }
+  /agents/me/status:
+    put:
+      tags: [Riders]
+      summary: Go online / offline
+      security: [{ bearer: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { isOnline: { type: boolean } } } } } }
+      responses: { '200': { description: OK } }
+  /agents/me/location:
+    put:
+      tags: [Riders]
+      summary: GPS ping (also available over Socket.io)
+      security: [{ bearer: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { lat: { type: number }, lng: { type: number } } } } } }
+      responses: { '200': { description: OK } }
+  /agents:
+    get:
+      tags: [Riders]
+      summary: List riders (admin)
+      security: [{ bearer: [] }]
+      responses: { '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Agent' } } } } } }
+    post:
+      tags: [Riders]
+      summary: Create rider + rider login (admin)
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, phone, email, password]
+              properties:
+                name: { type: string }
+                phone: { type: string }
+                email: { type: string }
+                password: { type: string, minLength: 8 }
+                vehicleType: { type: string, enum: [bike, scooter, bicycle] }
+                vehicleNumber: { type: string }
+      responses: { '201': { description: Created } }
+  /agents/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    put:
+      tags: [Riders]
+      summary: Update rider (admin)
+      security: [{ bearer: [] }]
+      responses: { '200': { description: OK } }
+    delete:
+      tags: [Riders]
+      summary: Delete rider (admin)
+      security: [{ bearer: [] }]
+      responses: { '200': { description: OK } }
+
+  /coupons:
+    get:
+      tags: [Coupons]
+      summary: Active coupons
+      parameters: [{ name: restaurantId, in: query, schema: { type: string } }]
+      responses: { '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Coupon' } } } } } }
+    post:
+      tags: [Coupons]
+      summary: Create coupon (admin)
+      security: [{ bearer: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Coupon' } } } }
+      responses: { '201': { description: Created } }
+  /coupons/all:
+    get:
+      tags: [Coupons]
+      summary: All coupons incl. inactive (admin)
+      security: [{ bearer: [] }]
+      responses: { '200': { description: OK } }
+  /coupons/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    put:
+      tags: [Coupons]
+      summary: Activate / deactivate (admin)
+      security: [{ bearer: [] }]
+      responses: { '200': { description: OK } }
+    delete:
+      tags: [Coupons]
+      summary: Delete coupon (admin)
+      security: [{ bearer: [] }]
+      responses: { '200': { description: OK } }
+
+  /uploads:
+    post:
+      tags: [Admin]
+      summary: Upload an image to Cloudinary (admin)
+      security: [{ bearer: [] }]
+      parameters: [{ name: folder, in: query, schema: { type: string, enum: [restaurants, menu, agents] } }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { type: object, properties: { image: { type: string, format: binary } } }
+      responses: { '201': { description: Created, content: { application/json: { schema: { type: object, properties: { url: { type: string } } } } } } }
+  /admin/stats:
+    get:
+      tags: [Admin]
+      summary: Dashboard analytics (totals, daily orders/revenue, top dishes, status breakdown)
+      security: [{ bearer: [] }]
+      parameters: [{ name: days, in: query, schema: { type: integer, default: 14, maximum: 90 } }]
+      responses: { '200': { description: OK } }

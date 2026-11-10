@@ -1,229 +1,177 @@
-import { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import API from '../api';
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import API, { errorMessage } from '../api';
 import { useCart } from '../context/CartContext';
+import { EmptyState, Loader, Stars, VegMark } from '../components/ui';
+import { FALLBACK_FOOD, FALLBACK_RESTAURANT, formatDateTime, rupees } from '../lib/format';
 
 const Restaurant = () => {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { addItem, removeItem, getItemQuantity, totalItems, subtotal } = useCart();
+  const { addItem, removeItem, getItemQuantity, totalItems, subtotal, cart } = useCart();
 
   const [restaurant, setRestaurant] = useState(null);
-  const [menu, setMenu]             = useState({ items: [], grouped: {} });
-  const [loading, setLoading]       = useState(true);
+  const [items, setItems] = useState([]);
+  const [reviews, setReviews] = useState([]);
+  const [coupons, setCoupons] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [vegOnly, setVegOnly] = useState(false);
   const [activeCategory, setActiveCategory] = useState('');
 
   useEffect(() => {
-    fetchData();
+    let cancelled = false;
+    setLoading(true);
+    Promise.all([
+      API.get(`/restaurants/${id}`),
+      API.get(`/menu/${id}`, { params: { all: true } }),
+      API.get(`/restaurants/${id}/reviews`).catch(() => ({ data: [] })),
+      API.get('/coupons', { params: { restaurantId: id } }).catch(() => ({ data: [] })),
+    ])
+      .then(([r, m, rv, c]) => {
+        if (cancelled) return;
+        setRestaurant(r.data);
+        setItems(m.data.items);
+        setReviews(rv.data);
+        setCoupons(c.data);
+      })
+      .catch((e) => !cancelled && setError(errorMessage(e, 'Failed to load restaurant')))
+      .finally(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+    };
   }, [id]);
 
-  const fetchData = async () => {
-    try {
-      setLoading(true);
-      const [restRes, menuRes] = await Promise.all([
-        API.get(`/restaurants/${id}`),
-        API.get(`/menu/${id}`),
-      ]);
-      setRestaurant(restRes.data);
-      setMenu(menuRes.data);
-      const cats = Object.keys(menuRes.data.grouped || {});
-      if (cats.length > 0) setActiveCategory(cats[0]);
-    } catch (err) {
-      alert('Failed to load restaurant details');
-    } finally {
-      setLoading(false);
-    }
+  const grouped = useMemo(() => {
+    const g = {};
+    items.filter((i) => !vegOnly || i.isVeg).forEach((i) => (g[i.category] ||= []).push(i));
+    return g;
+  }, [items, vegOnly]);
+  const categories = Object.keys(grouped);
+
+  const scrollTo = (cat) => {
+    setActiveCategory(cat);
+    document.getElementById(`cat-${cat}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
-  if (loading) return (
-    <div className="loader"><div className="spinner"></div></div>
-  );
+  if (loading) return <Loader />;
+  if (error || !restaurant) return <EmptyState emoji="😕" title={error || 'Restaurant not found'} />;
 
-  if (!restaurant) return (
-    <div className="empty-state">
-      <div className="emoji">😕</div>
-      <h3>Restaurant not found</h3>
-    </div>
-  );
-
-  const categories = Object.keys(menu.grouped);
+  const cartIsHere = cart.restaurantId === restaurant._id;
 
   return (
     <div>
-      {/* Restaurant Banner */}
-      <div style={{ position: 'relative', height: 280, overflow: 'hidden' }}>
-        <img
-          src={restaurant.image || 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=1200'}
-          alt={restaurant.name}
-          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-          onError={(e) => {
-            e.target.src = 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=1200';
-          }}
-        />
-        <div style={{
-          position: 'absolute', inset: 0,
-          background: 'linear-gradient(to top, rgba(0,0,0,0.8) 0%, transparent 60%)',
-        }}/>
-        <button
-          onClick={() => navigate(-1)}
-          style={{
-            position: 'absolute', top: 20, left: 20,
-            background: 'white', border: 'none', borderRadius: '50%',
-            width: 40, height: 40, cursor: 'pointer', fontSize: '1.1rem',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}
-        >←</button>
-        <div style={{ position: 'absolute', bottom: 24, left: 24, color: 'white' }}>
-          <h1 style={{ fontFamily: 'Syne', fontSize: '2rem', marginBottom: 8 }}>
-            {restaurant.name}
-          </h1>
-          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', opacity: 0.9, fontSize: '0.9rem' }}>
-            <span>⭐ {restaurant.rating} ({restaurant.totalRatings} ratings)</span>
+      <div className="banner">
+        <img src={restaurant.image || FALLBACK_RESTAURANT} alt="" onError={(e) => { e.currentTarget.src = FALLBACK_RESTAURANT; }} />
+        <div className="banner-shade" />
+        <button type="button" className="back-btn" onClick={() => navigate(-1)} aria-label="Go back">←</button>
+        <div className="banner-text">
+          <h1>{restaurant.name}</h1>
+          <div className="row gap-16 wrap small">
+            <span>⭐ {restaurant.totalRatings ? `${restaurant.rating.toFixed(1)} (${restaurant.totalRatings} ratings)` : 'New'}</span>
             <span>🕐 {restaurant.deliveryTime}</span>
-            <span>🚚 ₹{restaurant.deliveryFee} delivery</span>
+            <span>🚚 from {rupees(restaurant.deliveryFee)}</span>
+            <span>Min {rupees(restaurant.minimumOrder)}</span>
+            {restaurant.pureVeg && <span className="veg-pill">Pure veg</span>}
           </div>
+          <div className="small" style={{ opacity: 0.85, marginTop: 4 }}>{restaurant.address}</div>
         </div>
       </div>
 
-      {/* Offers Strip */}
-      {restaurant.offers?.length > 0 && (
-        <div style={{
-          background: '#FFF3EE', padding: '12px 24px',
-          display: 'flex', gap: 20, overflowX: 'auto',
-        }}>
-          {restaurant.offers.map((offer, i) => (
-            <span key={i} style={{
-              background: 'white', padding: '6px 16px', borderRadius: 8,
-              color: 'var(--primary)', fontWeight: 600, fontSize: '0.85rem',
-              whiteSpace: 'nowrap', border: '1px dashed var(--primary)',
-            }}>
-              🏷️ {offer}
-            </span>
+      {!restaurant.isOpen && <div className="alert alert-error" style={{ borderRadius: 0 }}>This restaurant is closed right now — you can browse the menu, but ordering is paused.</div>}
+
+      {(restaurant.offers?.length > 0 || coupons.length > 0) && (
+        <div className="offers-strip">
+          {coupons.map((c) => (
+            <span key={c.code} className="offer-chip" title={c.description}>🎟️ <b>{c.code}</b> · {c.description}</span>
+          ))}
+          {restaurant.offers.map((o) => (
+            <span key={o} className="offer-chip">🏷️ {o}</span>
           ))}
         </div>
       )}
 
-      <div style={{ display: 'flex', maxWidth: 1200, margin: '0 auto' }}>
-        {/* Category Sidebar */}
-        <div style={{
-          width: 160, flexShrink: 0, padding: '24px 0',
-          borderRight: '1px solid #F3F4F6', position: 'sticky',
-          top: 72, height: 'calc(100vh - 72px)', overflowY: 'auto',
-        }}>
-          {categories.map(cat => (
-            <button
-              key={cat}
-              onClick={() => setActiveCategory(cat)}
-              style={{
-                display: 'block', width: '100%', textAlign: 'left',
-                padding: '12px 20px', border: 'none', cursor: 'pointer',
-                background: activeCategory === cat ? 'var(--secondary)' : 'transparent',
-                color: activeCategory === cat ? 'var(--primary)' : '#6B7280',
-                fontWeight: activeCategory === cat ? 700 : 400,
-                borderLeft: activeCategory === cat ? '3px solid var(--primary)' : '3px solid transparent',
-                fontFamily: 'DM Sans',
-                fontSize: '0.9rem',
-              }}
-            >
+      <div className="menu-layout">
+        <aside className="menu-sidebar" aria-label="Menu categories">
+          <label className="toggle" style={{ padding: '0 20px 12px' }}>
+            <input type="checkbox" checked={vegOnly} onChange={(e) => setVegOnly(e.target.checked)} /> Veg only
+          </label>
+          {categories.map((cat) => (
+            <button type="button" key={cat} className={`cat-btn ${activeCategory === cat ? 'active' : ''}`} onClick={() => scrollTo(cat)}>
               {cat}
             </button>
           ))}
-        </div>
+        </aside>
 
-        {/* Menu Items */}
-        <div style={{ flex: 1 }}>
-          {categories.map(cat => (
-            <div key={cat} id={`cat-${cat}`}>
-              <h2 style={{
-                padding: '20px 24px 12px',
-                fontFamily: 'Syne', fontSize: '1.3rem',
-                borderBottom: '1px solid #F3F4F6',
-              }}>
-                {cat} ({menu.grouped[cat].length})
-              </h2>
-              {menu.grouped[cat].map(item => {
+        <div className="menu-main">
+          {categories.map((cat) => (
+            <section key={cat} id={`cat-${cat}`} className="menu-section">
+              <h2>{cat} ({grouped[cat].length})</h2>
+              {grouped[cat].map((item) => {
                 const qty = getItemQuantity(item._id);
+                const canAdd = item.isAvailable && restaurant.isOpen;
                 return (
-                  <div key={item._id} className="menu-item">
-                    <div className="menu-item-info" style={{ flex: 1 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                        <span className={item.isVeg ? 'veg-icon' : 'nonveg-icon'}>
-                          {item.isVeg ? '🟢' : '🔴'}
-                        </span>
+                  <div key={item._id} className={`menu-item ${item.isAvailable ? '' : 'sold-out'}`}>
+                    <div className="menu-item-info">
+                      <div className="row gap-8" style={{ marginBottom: 4 }}>
+                        <VegMark veg={item.isVeg} />
                         {item.isBestseller && <span className="bestseller-tag">⭐ Bestseller</span>}
+                        {!item.isAvailable && <span className="soldout-tag">Sold out</span>}
                       </div>
                       <h4>{item.name}</h4>
                       <p>{item.description}</p>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 8 }}>
-                        <span className="price">₹{item.price}</span>
-                        {item.offer && (
-                          <span style={{
-                            background: '#FFF3EE', color: 'var(--primary)',
-                            fontSize: '0.75rem', fontWeight: 600,
-                            padding: '2px 8px', borderRadius: 4,
-                          }}>
-                            {item.offer}
-                          </span>
-                        )}
+                      <div className="row gap-12">
+                        <span className="price">{rupees(item.price)}</span>
+                        {item.offer && <span className="offer-mini">{item.offer}</span>}
                       </div>
                     </div>
-
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-                      <img
-                        src={item.image || 'https://images.unsplash.com/photo-1565299507177-b0ac66763828?w=200'}
-                        alt={item.name}
-                        style={{ width: 100, height: 85, objectFit: 'cover', borderRadius: 12 }}
-                        onError={(e) => {
-                          e.target.src = 'https://images.unsplash.com/photo-1565299507177-b0ac66763828?w=200';
-                        }}
-                      />
-                      {qty === 0 ? (
-                        <button
-                          className="btn btn-primary btn-sm"
-                          onClick={() => addItem(item, restaurant._id, restaurant.name)}
-                        >
-                          + ADD
-                        </button>
+                    <div className="menu-item-side">
+                      <img src={item.image || FALLBACK_FOOD} alt="" loading="lazy" onError={(e) => { e.currentTarget.src = FALLBACK_FOOD; }} />
+                      {!canAdd ? (
+                        <button type="button" className="btn btn-sm" disabled>Unavailable</button>
+                      ) : qty === 0 ? (
+                        <button type="button" className="btn btn-primary btn-sm" onClick={() => addItem(item, restaurant._id, restaurant.name)}>+ ADD</button>
                       ) : (
                         <div className="counter">
-                          <button className="counter-btn" onClick={() => removeItem(item._id)}>−</button>
-                          <span className="counter-num">{qty}</span>
-                          <button className="counter-btn" onClick={() => addItem(item, restaurant._id, restaurant.name)}>+</button>
+                          <button type="button" className="counter-btn" onClick={() => removeItem(item._id)} aria-label={`Remove one ${item.name}`}>−</button>
+                          <span className="counter-num" aria-live="polite">{qty}</span>
+                          <button type="button" className="counter-btn" onClick={() => addItem(item, restaurant._id, restaurant.name)} aria-label={`Add one ${item.name}`}>+</button>
                         </div>
                       )}
                     </div>
                   </div>
                 );
               })}
-            </div>
+            </section>
           ))}
 
-          {categories.length === 0 && (
-            <div className="empty-state">
-              <div className="emoji">🍽️</div>
-              <h3>No menu items yet</h3>
-              <p>Check back later</p>
-            </div>
-          )}
+          {categories.length === 0 && <EmptyState emoji="🍽️" title={vegOnly ? 'No veg items here' : 'No menu items yet'} />}
+
+          <section className="menu-section">
+            <h2>Reviews</h2>
+            {reviews.length === 0 ? (
+              <p className="muted" style={{ padding: '12px 24px' }}>No reviews yet — order and be the first!</p>
+            ) : (
+              reviews.map((r) => (
+                <div key={r._id} className="review">
+                  <div className="row between">
+                    <b>{r.userName}</b>
+                    <Stars value={r.rating} size="1rem" />
+                  </div>
+                  {r.comment && <p>{r.comment}</p>}
+                  <span className="muted small">{formatDateTime(r.createdAt)}</span>
+                </div>
+              ))
+            )}
+          </section>
         </div>
       </div>
 
-      {/* Floating Cart Bar */}
-      {totalItems > 0 && (
-        <div style={{
-          position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)',
-          background: 'var(--primary)', color: 'white',
-          padding: '16px 32px', borderRadius: 50,
-          display: 'flex', alignItems: 'center', gap: 24,
-          boxShadow: '0 8px 32px rgba(255,69,0,0.4)',
-          cursor: 'pointer', zIndex: 200, minWidth: 300,
-          justifyContent: 'space-between',
-        }}
-          onClick={() => navigate('/cart')}
-        >
-          <span style={{ fontWeight: 700 }}>{totalItems} items | ₹{subtotal}</span>
-          <span style={{ fontWeight: 700 }}>View Cart →</span>
-        </div>
+      {totalItems > 0 && cartIsHere && (
+        <button type="button" className="cart-bar" onClick={() => navigate('/cart')}>
+          <span>{totalItems} item{totalItems > 1 ? 's' : ''} | {rupees(subtotal)}</span>
+          <span>View Cart →</span>
+        </button>
       )}
     </div>
   );

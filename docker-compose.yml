@@ -1,0 +1,31 @@
+# One-command local stack:  docker compose up --build
+# then:                     docker compose exec api node seed.js
+# Frontends run with `npm run dev` in frontend/ and admin-panel/ (they talk to http://localhost:5000/api).
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    ports: ["27017:27017"]
+    volumes: [mongo-data:/data/db]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      retries: 5
+
+  api:
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      mongo: { condition: service_healthy }
+    ports: ["5000:5000"]
+    env_file:
+      - path: ./backend/.env
+        required: false
+    environment:
+      NODE_ENV: development
+      MONGODB_URI: mongodb://mongo:27017/hungrybirds
+      JWT_SECRET: ${JWT_SECRET:-local-dev-secret-change-me}
+      CLIENT_ORIGINS: http://localhost:3000,http://localhost:3001
+
+volumes:
+  mongo-data:

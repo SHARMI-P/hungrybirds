@@ -1,0 +1,21 @@
+# Render Blueprint for the API (https://render.com/docs/blueprint-spec)
+services:
+  - type: web
+    name: hungrybirds-backend
+    runtime: node
+    rootDir: backend
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - { key: NODE_ENV, value: production }
+      - { key: NODE_VERSION, value: "22" }
+      - { key: MONGODB_URI, sync: false }
+      - { key: JWT_SECRET, generateValue: true }
+      - { key: CLIENT_ORIGINS, value: "https://hungrybirds-gamma.vercel.app,https://hbadmin.vercel.app" }
+      - { key: RAZORPAY_KEY_ID, sync: false }
+      - { key: RAZORPAY_KEY_SECRET, sync: false }
+      - { key: RAZORPAY_WEBHOOK_SECRET, sync: false }
+      - { key: CLOUDINARY_CLOUD_NAME, sync: false }
+      - { key: CLOUDINARY_API_KEY, sync: false }
+      - { key: CLOUDINARY_API_SECRET, sync: false }

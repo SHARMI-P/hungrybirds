@@ -1,37 +1,52 @@
-require('dotenv').config();
+// Seeds demo data. WIPES the database first, so it refuses to run in production
+// unless SEED_ALLOW_PRODUCTION=true is set explicitly.
+const crypto = require('crypto');
 const mongoose = require('mongoose');
-const User          = require('./models/User');
-const Restaurant    = require('./models/Restaurant');
-const MenuItem      = require('./models/MenuItem');
+const config = require('./config');
+const User = require('./models/User');
+const Restaurant = require('./models/Restaurant');
+const MenuItem = require('./models/MenuItem');
 const DeliveryAgent = require('./models/DeliveryAgent');
+const Order = require('./models/Order');
+const Coupon = require('./models/Coupon');
 
-mongoose.connect(process.env.MONGODB_URI)
-  .then(() => console.log('Connected to MongoDB'))
-  .catch(err => { console.error(err); process.exit(1); });
+if (config.isProd && process.env.SEED_ALLOW_PRODUCTION !== 'true') {
+  console.error('Refusing to wipe a production database. Set SEED_ALLOW_PRODUCTION=true if you really mean it.');
+  process.exit(1);
+}
+
+// Passwords come from env; the admin one is random if not provided (never a guessable default).
+const ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD || crypto.randomBytes(9).toString('base64url');
+const DEMO_PASSWORD = process.env.SEED_DEMO_PASSWORD || 'Demo@12345';
+const RIDER_PASSWORD = process.env.SEED_RIDER_PASSWORD || 'Rider@12345';
 
 const seed = async () => {
   try {
+    await mongoose.connect(config.MONGODB_URI);
+    console.log('Connected to MongoDB');
+    await Order.deleteMany({});
+    await Coupon.deleteMany({});
     await User.deleteMany({});
     await Restaurant.deleteMany({});
     await MenuItem.deleteMany({});
     await DeliveryAgent.deleteMany({});
 
-    const admin = await User.create({ name: 'Admin HungryBirds', email: 'admin@hungrybirds.com', phone: '9000000000', password: 'admin123', role: 'admin' });
-    await User.create({ name: 'Ravi Kumar', email: 'test@test.com', phone: '9876543210', password: 'test123', role: 'customer' });
+    const admin = await User.create({ name: 'Admin HungryBirds', email: 'admin@hungrybirds.com', phone: '9000000000', password: ADMIN_PASSWORD, role: 'admin' });
+    await User.create({ name: 'Ravi Kumar', email: 'test@test.com', phone: '9876543210', password: DEMO_PASSWORD, role: 'customer' });
     console.log('✅ Users created');
 
     const [renuka, newtaj, pedha, adarsha, udupi, ajanta, tandoor, shahi, comfort, dasaprakash, sweetcravings] = await Restaurant.insertMany([
-      { name: 'Hotel Shree Renuka',          image: 'https://res.cloudinary.com/dzx9gfdeo/image/upload/v1773300879/legends11_294ccb61819ddec916d428142fcb695d_accmd2.jpg',                                                                      cuisine: ['South Indian','North Indian'],           address: 'Sadashivanagar, Dharwad', location: { type:'Point', coordinates:[75.0078,15.4589] }, rating:4.3, totalRatings:320, deliveryTime:'25-35 mins', deliveryFee:20, minimumOrder:80,  isOpen:true, offers:['10% off above ₹150'],             ownerId:admin._id },
+      { name: 'Hotel Shree Renuka',          image: 'https://res.cloudinary.com/dzx9gfdeo/image/upload/v1773300879/legends11_294ccb61819ddec916d428142fcb695d_accmd2.jpg',                                                                      cuisine: ['South Indian','North Indian'],           address: 'Sadashivanagar, Dharwad', location: { type:'Point', coordinates:[75.0078,15.4589] }, rating:4.3, totalRatings:320, deliveryTime:'25-35 mins', deliveryFee:20, minimumOrder:80,  isOpen:true, pureVeg:true, offers:['10% off above ₹150'],             ownerId:admin._id },
       { name: 'New Taj Hotel',               image: 'https://res.cloudinary.com/dzx9gfdeo/image/upload/v1773300849/original_rcriyg.jpg',                                                                                                        cuisine: ['North Indian','Mughlai','Biryani'],      address: 'Court Circle, Dharwad',   location: { type:'Point', coordinates:[75.0134,15.4612] }, rating:4.5, totalRatings:540, deliveryTime:'30-45 mins', deliveryFee:30, minimumOrder:120, isOpen:true, offers:['Free raita above ₹250'],          ownerId:admin._id },
-      { name: 'Dharwad Pedha Sweet House',   image: 'https://res.cloudinary.com/dzx9gfdeo/image/upload/v1773301116/261_stoaw7.jpg',                                                                                                             cuisine: ['Sweets','Snacks','South Indian'],        address: 'Station Road, Dharwad',   location: { type:'Point', coordinates:[75.0089,15.4601] }, rating:4.7, totalRatings:890, deliveryTime:'20-30 mins', deliveryFee:15, minimumOrder:50,  isOpen:true, offers:['Buy 2 get 1 free on Pedha'],      ownerId:admin._id },
+      { name: 'Dharwad Pedha Sweet House',   image: 'https://res.cloudinary.com/dzx9gfdeo/image/upload/v1773301116/261_stoaw7.jpg',                                                                                                             cuisine: ['Sweets','Snacks','South Indian'],        address: 'Station Road, Dharwad',   location: { type:'Point', coordinates:[75.0089,15.4601] }, rating:4.7, totalRatings:890, deliveryTime:'20-30 mins', deliveryFee:15, minimumOrder:50,  isOpen:true, pureVeg:true, offers:['Buy 2 get 1 free on Pedha'],      ownerId:admin._id },
       { name: 'Hotel Adarsha',               image: 'https://res.cloudinary.com/dzx9gfdeo/image/upload/v1773301162/hotel-providence-paris-restaurant-main_ybif3p.jpg',                                                                         cuisine: ['Biryani','Kebab','North Indian'],        address: 'PB Road, Dharwad',        location: { type:'Point', coordinates:[75.0056,15.4578] }, rating:4.4, totalRatings:670, deliveryTime:'35-45 mins', deliveryFee:30, minimumOrder:150, isOpen:true, offers:['15% off on first order'],         ownerId:admin._id },
-      { name: 'Udupi Krishna Bhavan',        image: 'https://res.cloudinary.com/dzx9gfdeo/image/upload/v1773300716/1-5_fbib8y.png',                                                                                                             cuisine: ['South Indian','Tiffin','Juices'],        address: 'Kalyan Nagar, Dharwad',   location: { type:'Point', coordinates:[75.0023,15.4545] }, rating:4.2, totalRatings:410, deliveryTime:'20-30 mins', deliveryFee:20, minimumOrder:60,  isOpen:true, offers:['Free coffee above ₹100'],         ownerId:admin._id },
+      { name: 'Udupi Krishna Bhavan',        image: 'https://res.cloudinary.com/dzx9gfdeo/image/upload/v1773300716/1-5_fbib8y.png',                                                                                                             cuisine: ['South Indian','Tiffin','Juices'],        address: 'Kalyan Nagar, Dharwad',   location: { type:'Point', coordinates:[75.0023,15.4545] }, rating:4.2, totalRatings:410, deliveryTime:'20-30 mins', deliveryFee:20, minimumOrder:60,  isOpen:true, pureVeg:true, offers:['Free coffee above ₹100'],         ownerId:admin._id },
       { name: 'Hotel Ajanta',                image: 'https://res.cloudinary.com/dzx9gfdeo/image/upload/v1773300840/2025-04-17-JeremyClark-ReadMcKendree-0182_V1-1600x1146_lpddsi.jpg',                                                         cuisine: ['North Indian','South Indian','Chinese'], address: 'Lamington Road, Hubli',   location: { type:'Point', coordinates:[75.1240,15.3647] }, rating:4.3, totalRatings:560, deliveryTime:'30-40 mins', deliveryFee:30, minimumOrder:100, isOpen:true, offers:['20% off above ₹300'],             ownerId:admin._id },
       { name: 'Tandoor Restaurant',          image: 'https://res.cloudinary.com/dzx9gfdeo/image/upload/v1773300833/Cinco-de-Mayo-8_8271E7A1-A096-C430-7911A4B232BC2E06-8271df310a866d5_8271f421-f4f6-0998-a7fbd9c17ced7598_yq3ywt.jpg',       cuisine: ['North Indian','Tandoor','Kebab'],        address: 'Keshwapur, Hubli',        location: { type:'Point', coordinates:[75.1198,15.3712] }, rating:4.6, totalRatings:720, deliveryTime:'35-50 mins', deliveryFee:40, minimumOrder:200, isOpen:true, offers:['Free naan above ₹400'],           ownerId:admin._id },
       { name: 'Shahi Biryani Center',        image: 'https://res.cloudinary.com/dzx9gfdeo/image/upload/v1773300840/2025-04-17-JeremyClark-ReadMcKendree-0182_V1-1600x1146_lpddsi.jpg',                                                         cuisine: ['Biryani','Mughlai','Kebab'],             address: 'Vidyanagar, Hubli',        location: { type:'Point', coordinates:[75.1356,15.3698] }, rating:4.5, totalRatings:830, deliveryTime:'30-45 mins', deliveryFee:30, minimumOrder:150, isOpen:true, offers:['10% off above ₹250'],             ownerId:admin._id },
       { name: 'Comfort Zone Cafe',           image: 'https://res.cloudinary.com/dzx9gfdeo/image/upload/v1773300837/blb12075_47901722071_o.jpg_imvu7x.jpg',                                                                                      cuisine: ['Fast Food','Burgers','Pizza','Shakes'],  address: 'Club Road, Hubli',        location: { type:'Point', coordinates:[75.1289,15.3625] }, rating:4.1, totalRatings:390, deliveryTime:'25-35 mins', deliveryFee:25, minimumOrder:100, isOpen:true, offers:['Free fries above ₹200'],          ownerId:admin._id },
-      { name: 'Hotel Dasaprakash',           image: 'https://res.cloudinary.com/dzx9gfdeo/image/upload/v1773300843/Mr_Gatti_s_Walmart_1716_b5qxmi.jpg',                                                                                        cuisine: ['South Indian','Tiffin','Meals'],         address: 'Desai Cross, Hubli',       location: { type:'Point', coordinates:[75.1312,15.3658] }, rating:4.4, totalRatings:610, deliveryTime:'20-35 mins', deliveryFee:20, minimumOrder:80,  isOpen:true, offers:['Free sambar above ₹150'],         ownerId:admin._id },
-      { name: 'Sweet Cravings Dessert Cafe', image: 'https://res.cloudinary.com/dzx9gfdeo/image/upload/v1773301116/261_stoaw7.jpg',                                                                                                             cuisine: ['Desserts','Ice Cream','Waffles','Shakes'],address: 'College Road, Dharwad',  location: { type:'Point', coordinates:[75.0110,15.4620] }, rating:4.6, totalRatings:280, deliveryTime:'20-30 mins', deliveryFee:20, minimumOrder:80,  isOpen:true, offers:['Free ice cream scoop above ₹300'], ownerId:admin._id },
+      { name: 'Hotel Dasaprakash',           image: 'https://res.cloudinary.com/dzx9gfdeo/image/upload/v1773300843/Mr_Gatti_s_Walmart_1716_b5qxmi.jpg',                                                                                        cuisine: ['South Indian','Tiffin','Meals'],         address: 'Desai Cross, Hubli',       location: { type:'Point', coordinates:[75.1312,15.3658] }, rating:4.4, totalRatings:610, deliveryTime:'20-35 mins', deliveryFee:20, minimumOrder:80,  isOpen:true, pureVeg:true, offers:['Free sambar above ₹150'],         ownerId:admin._id },
+      { name: 'Sweet Cravings Dessert Cafe', image: 'https://res.cloudinary.com/dzx9gfdeo/image/upload/v1773301116/261_stoaw7.jpg',                                                                                                             cuisine: ['Desserts','Ice Cream','Waffles','Shakes'],address: 'College Road, Dharwad',  location: { type:'Point', coordinates:[75.0110,15.4620] }, rating:4.6, totalRatings:280, deliveryTime:'20-30 mins', deliveryFee:20, minimumOrder:80,  isOpen:true, pureVeg:true, offers:['Free ice cream scoop above ₹300'], ownerId:admin._id },
     ]);
     console.log('✅ 11 Restaurants created');
 
@@ -114,18 +129,32 @@ const seed = async () => {
     ]);
     console.log('✅ 67 Menu items created');
 
-    await DeliveryAgent.insertMany([
-      { name:'Raju K',   phone:'9111111111', email:'raju@hb.com',   vehicleType:'bike',    vehicleNumber:'KA25AB1234', isOnline:true,  isAvailable:true,  rating:4.8, totalDeliveries:245, currentLocation:{ lat:15.4589, lng:75.0078 } },
-      { name:'Priya M',  phone:'9222222222', email:'priya@hb.com',  vehicleType:'scooter', vehicleNumber:'KA25CD5678', isOnline:true,  isAvailable:true,  rating:4.9, totalDeliveries:312, currentLocation:{ lat:15.4612, lng:75.0134 } },
-      { name:'Suresh B', phone:'9333333333', email:'suresh@hb.com', vehicleType:'bike',    vehicleNumber:'KA25EF9012', isOnline:true,  isAvailable:true,  rating:4.6, totalDeliveries:178, currentLocation:{ lat:15.3647, lng:75.1240 } },
-      { name:'Kavya R',  phone:'9444444444', email:'kavya@hb.com',  vehicleType:'scooter', vehicleNumber:'KA25GH3456', isOnline:true,  isAvailable:true,  rating:4.7, totalDeliveries:203, currentLocation:{ lat:15.3712, lng:75.1198 } },
-      { name:'Mahesh T', phone:'9555555555', email:'mahesh@hb.com', vehicleType:'bike',    vehicleNumber:'KA25IJ7890', isOnline:false, isAvailable:false, rating:4.5, totalDeliveries:156, currentLocation:{ lat:15.3698, lng:75.1356 } },
+    const riders = [
+      { name:'Raju K',   phone:'9111111111', email:'raju@hb.com',   vehicleType:'bike',    vehicleNumber:'KA25AB1234', isOnline:true,  rating:4.8, totalDeliveries:245, lat:15.4589, lng:75.0078 },
+      { name:'Priya M',  phone:'9222222222', email:'priya@hb.com',  vehicleType:'scooter', vehicleNumber:'KA25CD5678', isOnline:true,  rating:4.9, totalDeliveries:312, lat:15.4612, lng:75.0134 },
+      { name:'Suresh B', phone:'9333333333', email:'suresh@hb.com', vehicleType:'bike',    vehicleNumber:'KA25EF9012', isOnline:true,  rating:4.6, totalDeliveries:178, lat:15.3647, lng:75.1240 },
+      { name:'Kavya R',  phone:'9444444444', email:'kavya@hb.com',  vehicleType:'scooter', vehicleNumber:'KA25GH3456', isOnline:true,  rating:4.7, totalDeliveries:203, lat:15.3712, lng:75.1198 },
+      { name:'Mahesh T', phone:'9555555555', email:'mahesh@hb.com', vehicleType:'bike',    vehicleNumber:'KA25IJ7890', isOnline:false, rating:4.5, totalDeliveries:156, lat:15.3698, lng:75.1356 },
+    ];
+    for (const { lat, lng, ...r } of riders) {
+      const user = await User.create({ name: r.name, email: r.email, phone: r.phone, password: RIDER_PASSWORD, role: 'agent' });
+      await DeliveryAgent.create({ ...r, userId: user._id, isAvailable: true, location: { type: 'Point', coordinates: [lng, lat] } });
+    }
+    console.log('✅ 5 Delivery agents created (each with a rider login)');
+
+    await Coupon.insertMany([
+      { code:'WELCOME50', description:'50% off your first order (up to ₹100)', type:'percent', value:50, maxDiscount:100, minOrder:149, firstOrderOnly:true },
+      { code:'HUNGRY20',  description:'20% off up to ₹80 on orders above ₹249', type:'percent', value:20, maxDiscount:80, minOrder:249 },
+      { code:'FLAT75',    description:'Flat ₹75 off on orders above ₹399',      type:'flat',    value:75, minOrder:399 },
+      { code:'PEDHA30',   description:'₹30 off at Dharwad Pedha Sweet House',   type:'flat',    value:30, minOrder:150, restaurantId:pedha._id },
     ]);
-    console.log('✅ 5 Delivery agents created');
+    console.log('✅ 4 Coupons created');
 
     console.log('\n🎉 Seed complete!');
-    console.log('   Admin : admin@hungrybirds.com / admin123');
-    console.log('   User  : test@test.com / test123');
+    console.log(`   Admin    : admin@hungrybirds.com / ${ADMIN_PASSWORD}   ← save this`);
+    console.log(`   Customer : test@test.com / ${DEMO_PASSWORD}`);
+    console.log(`   Rider    : raju@hb.com / ${RIDER_PASSWORD}  (also priya@, suresh@, kavya@, mahesh@hb.com)`);
+    await mongoose.disconnect();
     process.exit(0);
   } catch (err) {
     console.error('❌ Seed error:', err);

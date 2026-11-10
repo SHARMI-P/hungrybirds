@@ -1,83 +1,77 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
 
-const CartContext = createContext();
+const CartContext = createContext(null);
+const KEY = 'hungrybirds_cart';
+const EMPTY = { restaurantId: null, restaurantName: '', items: [] };
 
+const load = () => {
+  try {
+    const saved = JSON.parse(localStorage.getItem(KEY) || 'null');
+    return saved?.items ? saved : EMPTY;
+  } catch {
+    return EMPTY;
+  }
+};
+
+// The cart stores what to display; prices shown here are only a preview.
+// The real bill always comes from the server (/orders/quote).
 export const CartProvider = ({ children }) => {
-  const [cart, setCart] = useState(() => {
-    const saved = localStorage.getItem('hungrybirds_cart');
-    return saved ? JSON.parse(saved) : { restaurantId: null, restaurantName: '', items: [] };
-  });
+  const [cart, setCart] = useState(load);
 
-  // Save cart to localStorage whenever it changes
   useEffect(() => {
-    localStorage.setItem('hungrybirds_cart', JSON.stringify(cart));
+    localStorage.setItem(KEY, JSON.stringify(cart));
   }, [cart]);
 
   const addItem = (item, restaurantId, restaurantName) => {
-    // If adding from a different restaurant, confirm clear
     if (cart.restaurantId && cart.restaurantId !== restaurantId && cart.items.length > 0) {
-      const confirm = window.confirm(
-        'Your cart has items from another restaurant. Clear cart and add this item?'
-      );
-      if (!confirm) return;
-      // Clear and add
-      setCart({
-        restaurantId,
-        restaurantName,
-        items: [{ ...item, quantity: 1 }],
-      });
+       
+      if (!window.confirm(`Your cart has items from ${cart.restaurantName}. Clear it and add this item?`)) return;
+      setCart({ restaurantId, restaurantName, items: [{ ...pick(item), quantity: 1 }] });
       toast.success('Cart updated!');
       return;
     }
-
     setCart((prev) => {
       const exists = prev.items.find((i) => i._id === item._id);
-      if (exists) {
-        return {
-          ...prev,
-          items: prev.items.map((i) =>
-            i._id === item._id ? { ...i, quantity: i.quantity + 1 } : i
-          ),
-        };
-      }
-      return {
-        restaurantId,
-        restaurantName,
-        items: [...prev.items, { ...item, quantity: 1 }],
-      };
+      const items = exists
+        ? prev.items.map((i) => (i._id === item._id ? { ...i, quantity: Math.min(i.quantity + 1, 50) } : i))
+        : [...prev.items, { ...pick(item), quantity: 1 }];
+      return { restaurantId, restaurantName, items };
     });
-    toast.success(`${item.name} added to cart 🛒`);
+    if (!cart.items.some((i) => i._id === item._id)) toast.success(`${item.name} added 🛒`, { id: 'cart-add' });
   };
 
-  const removeItem = (itemId) => {
+  const removeItem = (itemId) =>
     setCart((prev) => {
-      const updated = prev.items
-        .map((i) => (i._id === itemId ? { ...i, quantity: i.quantity - 1 } : i))
-        .filter((i) => i.quantity > 0);
-      return { ...prev, items: updated };
+      const items = prev.items.map((i) => (i._id === itemId ? { ...i, quantity: i.quantity - 1 } : i)).filter((i) => i.quantity > 0);
+      return items.length ? { ...prev, items } : EMPTY;
     });
-  };
 
-  const clearCart = () => {
-    setCart({ restaurantId: null, restaurantName: '', items: [] });
-  };
+  const dropItem = (itemId) =>
+    setCart((prev) => {
+      const items = prev.items.filter((i) => i._id !== itemId);
+      return items.length ? { ...prev, items } : EMPTY;
+    });
 
-  const getItemQuantity = (itemId) => {
-    const item = cart.items.find((i) => i._id === itemId);
-    return item ? item.quantity : 0;
-  };
+  const clearCart = () => setCart(EMPTY);
 
-  const totalItems = cart.items.reduce((sum, i) => sum + i.quantity, 0);
-  const subtotal   = cart.items.reduce((sum, i) => sum + i.price * i.quantity, 0);
+  // Used by "Reorder": swap the whole cart in one go.
+  const replaceCart = (restaurantId, restaurantName, items) =>
+    setCart({ restaurantId, restaurantName, items: items.map((i) => ({ ...pick(i), quantity: i.quantity })) });
 
-  return (
-    <CartContext.Provider
-      value={{ cart, addItem, removeItem, clearCart, getItemQuantity, totalItems, subtotal }}
-    >
-      {children}
-    </CartContext.Provider>
-  );
+  const getItemQuantity = (itemId) => cart.items.find((i) => i._id === itemId)?.quantity || 0;
+
+  const value = useMemo(() => {
+    const totalItems = cart.items.reduce((s, i) => s + i.quantity, 0);
+    const subtotal = cart.items.reduce((s, i) => s + i.price * i.quantity, 0);
+    const lines = cart.items.map((i) => ({ menuItemId: i._id, quantity: i.quantity }));
+    return { cart, lines, totalItems, subtotal, addItem, removeItem, dropItem, clearCart, replaceCart, getItemQuantity };
+  }, [cart]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return <CartContext.Provider value={value}>{children}</CartContext.Provider>;
 };
 
+const pick = ({ _id, name, price, image, isVeg }) => ({ _id, name, price, image, isVeg });
+
+// eslint-disable-next-line react-refresh/only-export-components
 export const useCart = () => useContext(CartContext);

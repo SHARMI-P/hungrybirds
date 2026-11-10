@@ -1,59 +1,120 @@
 const express = require('express');
-const router = express.Router();
 const DeliveryAgent = require('../models/DeliveryAgent');
-const { protect, adminOnly } = require('../middleware/auth');
+const User = require('../models/User');
+const Order = require('../models/Order');
+const { protect, adminOnly, requireRole } = require('../middleware/auth');
+const validate = require('../middleware/validate');
+const AppError = require('../utils/AppError');
+const { z, idParams, lat, lng, httpUrl } = require('../utils/schemas');
+const { findWorkForAgent } = require('../services/dispatch');
+const { emitToOrder, emitToAdmins } = require('../services/realtime');
 
-// @GET /api/agents - Get all agents (admin)
+const router = express.Router();
+
+const phone = z.string().trim().regex(/^[6-9]\d{9}$/, 'Enter a valid 10-digit mobile number');
+
+const agentBody = z.object({
+  name: z.string().trim().min(2).max(80),
+  phone,
+  email: z.email().trim().toLowerCase(),
+  password: z.string().min(8, 'Rider password must be at least 8 characters').max(128),
+  vehicleType: z.enum(['bike', 'scooter', 'bicycle']).default('bike'),
+  vehicleNumber: z.string().trim().max(20).default(''),
+  profileImage: httpUrl.default(''),
+});
+
+// ───────────── Rider (role: agent) self-service ─────────────
+
+const loadSelf = async (req) => {
+  const agent = await DeliveryAgent.findOne({ userId: req.user._id });
+  if (!agent) throw AppError.notFound('No rider profile linked to this account');
+  return agent;
+};
+
+// @GET /api/agents/me — rider profile + the order they're delivering
+router.get('/me', protect, requireRole('agent'), async (req, res) => {
+  const agent = await loadSelf(req);
+  const currentOrder = agent.currentOrderId
+    ? await Order.findById(agent.currentOrderId)
+      .populate('restaurantId', 'name address location image')
+      .populate('userId', 'name phone')
+    : null;
+  res.json({ agent, currentOrder });
+});
+
+// @PUT /api/agents/me/status — go online/offline
+router.put('/me/status', protect, requireRole('agent'), validate({ body: z.object({ isOnline: z.boolean() }) }), async (req, res) => {
+  const agent = await loadSelf(req);
+  if (!req.body.isOnline && agent.currentOrderId) throw AppError.badRequest('Finish your current delivery before going offline');
+  agent.isOnline = req.body.isOnline;
+  await agent.save();
+  if (agent.isOnline) await findWorkForAgent(agent._id);
+  emitToAdmins('agent_updated', { agentId: agent._id });
+  res.json(await DeliveryAgent.findById(agent._id));
+});
+
+// @PUT /api/agents/me/location — rider GPS ping; forwarded live to the customer
+router.put('/me/location', protect, requireRole('agent'), validate({ body: z.object({ lat, lng }) }), async (req, res) => {
+  const agent = await loadSelf(req);
+  agent.location = { type: 'Point', coordinates: [req.body.lng, req.body.lat] };
+  agent.lastLocationAt = new Date();
+  await agent.save();
+  if (agent.currentOrderId) {
+    emitToOrder(agent.currentOrderId, 'location_update', { lat: req.body.lat, lng: req.body.lng, at: agent.lastLocationAt });
+  } else if (agent.isOnline) {
+    await findWorkForAgent(agent._id);
+  }
+  res.json({ success: true });
+});
+
+// ───────────── Admin management ─────────────
+
+// @GET /api/agents
 router.get('/', protect, adminOnly, async (req, res) => {
-  try {
-    const agents = await DeliveryAgent.find({}).populate('currentOrderId', 'orderStatus');
-    res.json(agents);
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
+  const agents = await DeliveryAgent.find({}).populate('currentOrderId', 'orderStatus restaurantName').sort({ name: 1 });
+  res.json(agents);
 });
 
-// @POST /api/agents - Add new agent (admin)
-router.post('/', protect, adminOnly, async (req, res) => {
+// @POST /api/agents — creates the rider profile AND their login (role: agent)
+router.post('/', protect, adminOnly, validate({ body: agentBody }), async (req, res) => {
+  const { password, ...profile } = req.body;
+  if (await User.exists({ email: profile.email })) throw AppError.conflict('A user with this email already exists');
+
+  const user = await User.create({ name: profile.name, email: profile.email, phone: profile.phone, password, role: 'agent' });
   try {
-    const agent = await DeliveryAgent.create(req.body);
+    const agent = await DeliveryAgent.create({ ...profile, userId: user._id, isOnline: false, isAvailable: true });
     res.status(201).json(agent);
-  } catch (error) {
-    res.status(500).json({ message: error.message });
+  } catch (err) {
+    await User.deleteOne({ _id: user._id }); // keep data consistent
+    throw err;
   }
 });
 
-// @PUT /api/agents/:id - Update agent (admin)
-router.put('/:id', protect, adminOnly, async (req, res) => {
-  try {
-    const agent = await DeliveryAgent.findByIdAndUpdate(req.params.id, req.body, { new: true });
-    res.json(agent);
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-});
-
-// @PUT /api/agents/:id/location - Agent updates their own location
-router.put('/:id/location', async (req, res) => {
-  try {
-    const { lat, lng } = req.body;
-    await DeliveryAgent.findByIdAndUpdate(req.params.id, {
-      currentLocation: { lat, lng }
-    });
-    res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-});
+// @PUT /api/agents/:id — edit profile / toggle online
+router.put(
+  '/:id',
+  protect,
+  adminOnly,
+  validate({ params: idParams, body: agentBody.omit({ password: true, email: true }).partial().extend({ isOnline: z.boolean().optional() }) }),
+  async (req, res) => {
+    const agent = await DeliveryAgent.findById(req.params.id);
+    if (!agent) throw AppError.notFound('Agent not found');
+    if (req.body.isOnline === false && agent.currentOrderId) throw AppError.badRequest('This rider is on a delivery');
+    Object.assign(agent, req.body);
+    await agent.save();
+    if (agent.isOnline) await findWorkForAgent(agent._id);
+    res.json(await DeliveryAgent.findById(agent._id));
+  },
+);
 
 // @DELETE /api/agents/:id
-router.delete('/:id', protect, adminOnly, async (req, res) => {
-  try {
-    await DeliveryAgent.findByIdAndDelete(req.params.id);
-    res.json({ message: 'Agent deleted' });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
+router.delete('/:id', protect, adminOnly, validate({ params: idParams }), async (req, res) => {
+  const agent = await DeliveryAgent.findById(req.params.id);
+  if (!agent) throw AppError.notFound('Agent not found');
+  if (agent.currentOrderId) throw AppError.badRequest('This rider is on a delivery and cannot be removed now');
+  await agent.deleteOne();
+  if (agent.userId) await User.deleteOne({ _id: agent.userId, role: 'agent' });
+  res.json({ message: 'Agent deleted' });
 });
 
 module.exports = router;
