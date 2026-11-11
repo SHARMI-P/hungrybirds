@@ -10,6 +10,25 @@ const { z, idParams, lat, lng, httpUrl, pagination } = require('../utils/schemas
 const router = express.Router();
 
 const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// Spelling-tolerant search pattern, so "biriyani" finds "Biryani" and "panner" finds "Paneer".
+// For words of 4+ letters: vowels are optional/interchangeable and doubled letters are collapsed.
+const searchPattern = (q) =>
+  q
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .map((word) => {
+      const clean = word.replace(/[^a-z0-9]/g, '');
+      if (clean.length < 4) return escapeRegex(word);
+      return clean
+        .replace(/([^aeiouy0-9])\1+/g, '$1')
+        .replace(/[aeiouy]+/g, '_')
+        .split('')
+        .map((ch) => (ch === '_' ? '[aeiouy]*' : /[0-9]/.test(ch) ? ch : `${ch}+`))
+        .join('');
+    })
+    .join('.*');
 const bool = z.enum(['true', 'false']).transform((v) => v === 'true');
 
 const nearbyQuery = z.object({
@@ -34,8 +53,10 @@ router.get('/nearby', validate({ query: nearbyQuery }), async (req, res) => {
   if (minRating) match.rating = { $gte: minRating };
   if (cuisine) match.cuisine = { $regex: `^${escapeRegex(cuisine)}$`, $options: 'i' };
   if (q) {
-    const rx = { $regex: escapeRegex(q), $options: 'i' };
-    match.$or = [{ name: rx }, { cuisine: rx }];
+    // Match restaurant name, cuisine, or any dish on its menu.
+    const rx = { $regex: searchPattern(q), $options: 'i' };
+    const withDish = await MenuItem.distinct('restaurantId', { $or: [{ name: rx }, { category: rx }] });
+    match.$or = [{ name: rx }, { cuisine: rx }, { _id: { $in: withDish } }];
   }
 
   const sortStage = { distance: { distanceM: 1 }, rating: { rating: -1, distanceM: 1 }, deliveryFee: { deliveryFee: 1, distanceM: 1 } }[sort];

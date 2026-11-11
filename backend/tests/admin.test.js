@@ -1,4 +1,5 @@
 const { api, connect, disconnect, clear, createUser, createRestaurant, NEARBY_ADDRESS } = require('./helpers');
+const MenuItem = require('../models/MenuItem');
 
 beforeAll(connect);
 afterAll(disconnect);
@@ -37,6 +38,20 @@ describe('restaurants', () => {
     expect(q.body.map((r) => r.name)).toEqual(['Kebab King']);
 
     expect((await api().get('/api/restaurants/nearby').query({ lat: 200, lng: 75 })).status).toBe(400);
+  });
+
+  test('search finds dishes on the menu and tolerates spelling', async () => {
+    const { restaurant: kebab } = await createRestaurant({ name: 'Kebab King', cuisine: ['Mughlai'] });
+    await MenuItem.create({ restaurantId: kebab._id, name: 'Chicken Biryani', price: 220, category: 'Rice', isVeg: false });
+    await createRestaurant({ name: 'Paneer Palace', cuisine: ['North Indian'] });
+    const search = async (q) =>
+      (await api().get('/api/restaurants/nearby').query({ lat: 15.45, lng: 75.01, q })).body.map((r) => r.name).sort();
+
+    expect(await search('biriyani')).toEqual(['Kebab King']); // misspelt dish name
+    expect(await search('biryani')).toEqual(['Kebab King']);
+    expect(await search('panner')).toEqual(['Paneer Palace']); // misspelt restaurant name
+    expect(await search('dosa')).toEqual(['Kebab King', 'Paneer Palace']); // dish on both menus
+    expect(await search('pizza')).toEqual([]);
   });
 
   test('menu: sold-out items hidden by default, admin can toggle availability', async () => {
