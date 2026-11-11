@@ -481,3 +481,53 @@ button { font-family: inherit; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* ===================================================================
+   v3 — language switch, favourites, scheduling, chat, phone OTP
+   =================================================================== */
+body, button, input, select, textarea { font-family: 'DM Sans', 'Noto Sans Kannada', sans-serif; }
+h1, h2, h3, h4 { font-family: 'Syne', 'Noto Sans Kannada', sans-serif; }
+html[lang="kn"] body { line-height: 1.65; }
+
+.lang-btn { background: var(--light-gray); border: none; border-radius: 50px; padding: 7px 14px; cursor: pointer; font-weight: 600; font-size: .85rem; white-space: nowrap; }
+.lang-btn:hover { background: #E5E7EB; }
+
+.restaurant-card { position: relative; }
+.card-link { display: block; color: inherit; text-decoration: none; }
+.fav-btn { background: white; border: none; border-radius: 50%; width: 38px; height: 38px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; font-size: 1.1rem; box-shadow: 0 2px 10px rgba(0,0,0,.18); transition: transform .15s; }
+.fav-btn:hover { transform: scale(1.1); }
+.fav-btn.on { animation: pop .25s ease; }
+@keyframes pop { 50% { transform: scale(1.25); } }
+.fav-on-card { position: absolute; top: 12px; right: 12px; z-index: 2; }
+.fav-on-banner { position: absolute; top: 20px; right: 20px; z-index: 2; }
+
+.segmented-lg { display: flex; background: var(--light-gray); border-radius: 12px; padding: 4px; gap: 4px; }
+.segmented-lg button { flex: 1; border: none; background: transparent; padding: 10px 12px; border-radius: 9px; cursor: pointer; font-weight: 600; color: var(--gray); font-size: .92rem; }
+.segmented-lg button.active { background: white; color: var(--primary); box-shadow: 0 1px 6px rgba(0,0,0,.1); }
+.select-lg { width: 100%; padding: 12px 14px; border: 1.5px solid #E5E7EB; border-radius: 10px; background: white; font-size: .95rem; margin-top: 6px; }
+
+.status-hero.scheduled { background: linear-gradient(135deg, #7C3AED, #A78BFA); }
+.status-scheduled { background: #EDE9FE; color: #6D28D9; }
+
+/* Chat */
+.chat-title { margin: 18px 0 8px; font-size: .95rem; }
+.chat { display: flex; flex-direction: column; }
+.chat-list { max-height: 260px; min-height: 90px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 12px; background: #FAFAFA; border-radius: 12px; }
+.chat-msg { align-self: flex-start; max-width: 80%; background: white; border: 1px solid #EEE; border-radius: 14px 14px 14px 4px; padding: 8px 12px; display: flex; flex-direction: column; gap: 2px; font-size: .92rem; }
+.chat-msg.mine { align-self: flex-end; background: var(--primary); color: white; border-color: var(--primary); border-radius: 14px 14px 4px 14px; }
+.chat-msg time { font-size: .68rem; opacity: .7; align-self: flex-end; }
+.chat-name { font-size: .72rem; font-weight: 700; color: var(--primary); }
+.chat-form { display: flex; gap: 8px; margin-top: 8px; }
+.chat-form input { flex: 1; padding: 10px 14px; border: 1.5px solid #E5E7EB; border-radius: 50px; font-size: .92rem; }
+.chat-form input:focus { border-color: var(--primary); outline: none; }
+
+/* Phone OTP */
+.phone-input { display: flex; align-items: stretch; border: 1.5px solid #E5E7EB; border-radius: 10px; overflow: hidden; }
+.phone-input span { background: var(--light-gray); padding: 0 12px; display: flex; align-items: center; font-weight: 600; color: var(--gray); }
+.phone-input input { border: none !important; flex: 1; }
+.otp-input { letter-spacing: .5em; font-size: 1.3rem !important; text-align: center; font-variant-numeric: tabular-nums; }
+.mono { font-family: ui-monospace, Menlo, monospace; letter-spacing: .15em; font-size: 1.05rem; }
+
+@media (max-width: 640px) {
+  .lang-btn { padding: 6px 10px; font-size: .78rem; }
+}

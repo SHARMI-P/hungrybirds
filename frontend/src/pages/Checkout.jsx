@@ -1,18 +1,32 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import API, { errorMessage } from '../api';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
+import { useT } from '../i18n';
 import AddressPicker from '../components/AddressPicker';
 import { Card, EmptyState, VegMark } from '../components/ui';
-import { rupees } from '../lib/format';
+import { formatSlot, rupees } from '../lib/format';
 import { loadRazorpay } from '../lib/razorpay';
+
+// Delivery slots every 30 min, from ~1 hour from now, 8 am – 10:30 pm, for the next 3 days.
+const buildSlots = () => {
+  const slots = [];
+  const start = new Date(Date.now() + 60 * 60 * 1000);
+  start.setMinutes(start.getMinutes() < 30 ? 30 : 60, 0, 0);
+  for (let d = new Date(start); d.getTime() < Date.now() + 3 * 24 * 60 * 60 * 1000; d = new Date(d.getTime() + 30 * 60 * 1000)) {
+    const h = Number(d.toLocaleString('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', hour12: false }));
+    if (h >= 8 && h < 23) slots.push(d.toISOString());
+  }
+  return slots;
+};
 
 const Checkout = () => {
   const navigate = useNavigate();
   const { cart, lines, clearCart } = useCart();
   const { user } = useAuth();
+  const { t, locale } = useT();
 
   const first = user?.addresses?.[0];
   const [address, setAddress] = useState(first ? { fullAddress: first.fullAddress, lat: first.lat, lng: first.lng } : null);
@@ -20,11 +34,15 @@ const Checkout = () => {
   const [coupon, setCoupon] = useState('');
   const [coupons, setCoupons] = useState([]);
   const [method, setMethod] = useState('cod');
+  const [when, setWhen] = useState('now'); // 'now' | 'later'
+  const [slot, setSlot] = useState('');
   const [razorpayEnabled, setRazorpayEnabled] = useState(false);
   const [quote, setQuote] = useState(null);
   const [quoteError, setQuoteError] = useState('');
   const [quoting, setQuoting] = useState(false);
   const [placing, setPlacing] = useState(false);
+
+  const slots = useMemo(buildSlots, []);
 
   useEffect(() => {
     API.get('/payment/config')
@@ -40,7 +58,7 @@ const Checkout = () => {
   const linesKey = JSON.stringify(lines);
   useEffect(() => {
     if (!cart.restaurantId || !lines.length) return undefined;
-    const t = setTimeout(async () => {
+    const timer = setTimeout(async () => {
       setQuoting(true);
       try {
         const { data } = await API.post('/orders/quote', {
@@ -52,7 +70,7 @@ const Checkout = () => {
         setQuote(data);
         setQuoteError('');
       } catch (e) {
-        const msg = errorMessage(e, 'Could not price your cart');
+        const msg = errorMessage(e, t('checkout.priceError'));
         if (coupon && /coupon|first order|more to use/i.test(msg)) {
           toast.error(msg);
           setCoupon('');
@@ -64,26 +82,26 @@ const Checkout = () => {
         setQuoting(false);
       }
     }, 300);
-    return () => clearTimeout(t);
+    return () => clearTimeout(timer);
   }, [cart.restaurantId, linesKey, coupon, address?.lat, address?.lng]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!cart.items.length) {
     return (
       <div className="page-container">
-        <EmptyState emoji="🛒" title="Your cart is empty" />
+        <EmptyState emoji="🛒" title={t('cart.empty')} />
       </div>
     );
   }
 
   const done = (order) => {
     clearCart();
-    toast.success('Order placed! 🎉');
+    toast.success(order.orderStatus === 'scheduled' ? t('checkout.scheduledToast') : t('checkout.placedToast'));
     navigate(`/order/${order._id}`, { replace: true });
   };
 
   const payOnline = async (order, payment) => {
     if (!(await loadRazorpay())) {
-      toast.error('Could not load the payment window. Check your connection or choose Cash on Delivery.');
+      toast.error(t('checkout.rzpLoadError'));
       await API.post(`/orders/${order._id}/cancel`, { reason: 'Payment window failed to load' }).catch(() => {});
       setPlacing(false);
       return;
@@ -94,34 +112,37 @@ const Checkout = () => {
       currency: payment.currency,
       order_id: payment.orderId,
       name: 'HungryBirds',
-      description: `Order from ${order.restaurantName}`,
-      prefill: { name: user.name, email: user.email, contact: user.phone },
+      description: order.restaurantName,
+      prefill: { name: user.name, email: user.email || undefined, contact: user.phone },
       theme: { color: '#FF4500' },
       handler: async (response) => {
         try {
           const { data } = await API.post('/payment/verify', { orderId: order._id, ...response });
           done(data.order);
         } catch (e) {
-          toast.error(errorMessage(e, 'Payment verification failed'));
-          // The webhook may still confirm it — send the user to the order page either way.
-          navigate(`/order/${order._id}`);
+          toast.error(errorMessage(e, t('checkout.verifyError')));
+          navigate(`/order/${order._id}`); // the webhook may still confirm it
         }
       },
       modal: {
         ondismiss: async () => {
           await API.post(`/orders/${order._id}/cancel`, { reason: 'Payment cancelled' }).catch(() => {});
-          toast('Payment cancelled — nothing was charged.', { icon: 'ℹ️' });
+          toast(t('checkout.paymentCancelled'), { icon: 'ℹ️' });
           setPlacing(false);
         },
       },
     });
-    rzp.on('payment.failed', (r) => toast.error(r.error?.description || 'Payment failed'));
+    rzp.on('payment.failed', (r) => toast.error(r.error?.description || t('pay.failed')));
     rzp.open();
   };
 
   const placeOrder = async () => {
     if (!address?.fullAddress || address.fullAddress.length < 5) {
-      toast.error('Please choose a delivery address');
+      toast.error(t('checkout.chooseAddress'));
+      return;
+    }
+    if (when === 'later' && !slot) {
+      toast.error(t('checkout.chooseSlot'));
       return;
     }
     setPlacing(true);
@@ -132,29 +153,62 @@ const Checkout = () => {
         couponCode: coupon || undefined,
         paymentMethod: method,
         deliveryAddress: address,
+        ...(when === 'later' && { scheduledFor: slot }),
       });
       if (method === 'cod') return done(data.order);
       await payOnline(data.order, data.payment);
     } catch (e) {
-      toast.error(errorMessage(e, 'Failed to place order'));
+      toast.error(errorMessage(e, t('checkout.placeError')));
       setPlacing(false);
     }
   };
 
+  const slotsByDay = slots.reduce((acc, s) => {
+    const day = new Date(s).toLocaleDateString(locale, { weekday: 'short', day: 'numeric', month: 'short' });
+    (acc[day] ||= []).push(s);
+    return acc;
+  }, {});
+
   return (
     <div className="page-container checkout">
-      <h1 className="section-title">Checkout</h1>
+      <h1 className="section-title">{t('checkout.title')}</h1>
       <div className="checkout-grid">
         <div>
-          <Card title="📍 Delivery address">
+          <Card title={`📍 ${t('checkout.address')}`}>
             <AddressPicker value={address} onChange={setAddress} />
           </Card>
 
-          <Card title="💳 Payment method">
+          <Card title={`🕐 ${t('checkout.when')}`}>
+            <div className="segmented-lg" role="radiogroup" aria-label={t('checkout.when')}>
+              <button type="button" role="radio" aria-checked={when === 'now'} className={when === 'now' ? 'active' : ''} onClick={() => setWhen('now')}>
+                ⚡ {t('checkout.now')}
+              </button>
+              <button type="button" role="radio" aria-checked={when === 'later'} className={when === 'later' ? 'active' : ''} onClick={() => setWhen('later')}>
+                🗓️ {t('checkout.later')}
+              </button>
+            </div>
+            {when === 'later' && (
+              <label className="input-group" style={{ marginTop: 12 }}>
+                <span className="small muted">{t('checkout.slotHint')}</span>
+                <select value={slot} onChange={(e) => setSlot(e.target.value)} className="select-lg">
+                  <option value="">{t('checkout.pickSlot')}</option>
+                  {Object.entries(slotsByDay).map(([day, list]) => (
+                    <optgroup key={day} label={day}>
+                      {list.map((s) => (
+                        <option key={s} value={s}>{new Date(s).toLocaleTimeString(locale, { hour: 'numeric', minute: '2-digit' })}</option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+              </label>
+            )}
+          </Card>
+
+          <Card title={`💳 ${t('checkout.payment')}`}>
             <div className="stack gap-12">
               {[
-                { id: 'razorpay', label: 'Online payment (UPI / Card / Netbanking)', sub: razorpayEnabled ? 'Secured by Razorpay' : 'Not available right now', disabled: !razorpayEnabled },
-                { id: 'cod', label: 'Cash on Delivery', sub: 'Pay when your food arrives' },
+                { id: 'razorpay', label: t('checkout.online'), sub: razorpayEnabled ? t('checkout.onlineSub') : t('checkout.onlineOff'), disabled: !razorpayEnabled },
+                { id: 'cod', label: t('checkout.cod'), sub: t('checkout.codSub') },
               ].map((opt) => (
                 <label key={opt.id} className={`pay-option ${method === opt.id ? 'selected' : ''} ${opt.disabled ? 'disabled' : ''}`}>
                   <input type="radio" name="payment" value={opt.id} checked={method === opt.id} disabled={opt.disabled} onChange={() => setMethod(opt.id)} />
@@ -184,8 +238,8 @@ const Checkout = () => {
                 if (couponInput.trim()) setCoupon(couponInput.trim().toUpperCase());
               }}
             >
-              <input value={couponInput} onChange={(e) => setCouponInput(e.target.value)} placeholder="Coupon code" aria-label="Coupon code" />
-              <button type="submit" className="btn btn-outline btn-sm">Apply</button>
+              <input value={couponInput} onChange={(e) => setCouponInput(e.target.value)} placeholder={t('checkout.coupon')} aria-label={t('checkout.coupon')} />
+              <button type="submit" className="btn btn-outline btn-sm">{t('checkout.apply')}</button>
             </form>
             {coupons.length > 0 && !coupon && (
               <div className="chip-row" style={{ marginBottom: 8 }}>
@@ -201,29 +255,37 @@ const Checkout = () => {
 
             {quote && (
               <div className={`bill ${quoting ? 'dim' : ''}`}>
-                <div className="bill-row"><span>Item total</span><span>{rupees(quote.subtotal)}</span></div>
+                <div className="bill-row"><span>{t('bill.itemTotal')}</span><span>{rupees(quote.subtotal)}</span></div>
                 {quote.discount > 0 && (
                   <div className="bill-row success">
                     <span>
-                      Coupon {quote.couponCode}{' '}
-                      <button type="button" className="link" onClick={() => { setCoupon(''); setCouponInput(''); }}>remove</button>
+                      {t('bill.coupon', { code: quote.couponCode })}{' '}
+                      <button type="button" className="link" onClick={() => { setCoupon(''); setCouponInput(''); }}>{t('checkout.remove')}</button>
                     </span>
                     <span>− {rupees(quote.discount)}</span>
                   </div>
                 )}
                 <div className="bill-row">
-                  <span>Delivery fee {address ? `(${quote.distanceKm} km)` : '(base)'}</span>
+                  <span>{address ? t('bill.deliveryKm', { km: quote.distanceKm }) : t('bill.deliveryBase')}</span>
                   <span>{rupees(quote.deliveryFee)}</span>
                 </div>
-                <div className="bill-row"><span>GST ({quote.taxPercent}%)</span><span>{rupees(quote.tax)}</span></div>
-                <div className="bill-row total"><span>To pay</span><span>{rupees(quote.finalAmount)}</span></div>
-                {address && <p className="muted small">🕐 Arrives in about {quote.estimatedDelivery}</p>}
+                <div className="bill-row"><span>{t('bill.gst', { pct: quote.taxPercent })}</span><span>{rupees(quote.tax)}</span></div>
+                <div className="bill-row total"><span>{t('bill.toPay')}</span><span>{rupees(quote.finalAmount)}</span></div>
+                {address && (
+                  <p className="muted small">
+                    {when === 'later' && slot ? `🗓️ ${t('checkout.arrivesAt', { time: formatSlot(slot, locale) })}` : `🕐 ${t('checkout.arrivesIn', { eta: quote.estimatedDelivery })}`}
+                  </p>
+                )}
               </div>
             )}
           </Card>
 
           <button type="button" className="btn btn-primary btn-full btn-lg" disabled={placing || !quote || !!quoteError || !address} onClick={placeOrder}>
-            {placing ? '⏳ Processing…' : !address ? 'Choose an address' : `Place order · ${quote ? rupees(quote.finalAmount) : '…'}`}
+            {placing
+              ? `⏳ ${t('checkout.processing')}`
+              : !address
+                ? t('checkout.chooseAddress')
+                : t(when === 'later' ? 'checkout.schedule' : 'checkout.place', { total: quote ? rupees(quote.finalAmount) : '…' })}
           </button>
         </div>
       </div>

@@ -9,7 +9,7 @@ const DeliveryAgent = require('./models/DeliveryAgent');
 const { userFromToken } = require('./middleware/auth');
 const { agentIdForUser } = require('./services/orderLifecycle');
 const { findWorkForAgent } = require('./services/dispatch');
-const { setIo, orderRoom, agentRoom, ADMIN_ROOM, emitToOrder } = require('./services/realtime');
+const { setIo, orderRoom, agentRoom, ADMIN_ROOM, emitToOrder, emitToAdmins } = require('./services/realtime');
 
 const LOCATION_MIN_INTERVAL_MS = 2000;
 
@@ -65,6 +65,7 @@ const attachSocket = (httpServer) => {
         { location: { type: 'Point', coordinates: [lng, lat] }, lastLocationAt: new Date(now) },
         { new: true },
       );
+      if (agent) emitToAdmins('agent_location', { agentId: agent._id, lat, lng, at: new Date(now) });
       if (agent?.currentOrderId) emitToOrder(agent.currentOrderId, 'location_update', { lat, lng, at: new Date(now) });
       else if (agent?.isOnline) await findWorkForAgent(agent._id); // first GPS fix → pick up waiting orders
     });

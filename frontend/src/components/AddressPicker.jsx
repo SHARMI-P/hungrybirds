@@ -4,6 +4,7 @@ import API, { errorMessage } from '../api';
 import { useAuth } from '../context/AuthContext';
 import { CITIES, DEFAULT_CITY, getCurrentPosition, reverseGeocode, searchPlaces } from '../lib/geo';
 import { LocationPicker } from './Maps';
+import { useT } from '../i18n';
 
 /**
  * Choose a delivery address: saved addresses, GPS, or OpenStreetMap search,
@@ -11,6 +12,7 @@ import { LocationPicker } from './Maps';
  */
 const AddressPicker = ({ value, onChange }) => {
   const { user, setAddresses } = useAuth();
+  const { t } = useT();
   const saved = user?.addresses || [];
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
@@ -42,8 +44,8 @@ const AddressPicker = ({ value, onChange }) => {
       const point = await getCurrentPosition();
       const { fullAddress } = await reverseGeocode(point);
       onChange({ ...point, fullAddress });
-    } catch (e) {
-      toast.error(`${e.message}. Search for your area or tap the map instead.`);
+    } catch {
+      toast.error(t('address.gpsFailed'));
       if (!value) onChange({ ...CITIES[DEFAULT_CITY], fullAddress: '' });
     } finally {
       setLocating(false);
@@ -60,7 +62,7 @@ const AddressPicker = ({ value, onChange }) => {
     try {
       const { data } = await API.post('/auth/addresses', { label: saveLabel, ...value });
       setAddresses(data);
-      toast.success('Address saved');
+      toast.success(t('address.saved'));
     } catch (e) {
       toast.error(errorMessage(e));
     }
@@ -84,9 +86,9 @@ const AddressPicker = ({ value, onChange }) => {
           {saved.map((a) => (
             <span key={a._id} className={`chip ${value?.lat === a.lat && value?.lng === a.lng ? 'chip-active' : ''}`}>
               <button type="button" className="chip-btn" onClick={() => onChange({ fullAddress: a.fullAddress, lat: a.lat, lng: a.lng })} title={a.fullAddress}>
-                {a.label === 'Work' ? '💼' : a.label === 'Home' ? '🏠' : '📍'} {a.label}
+                {a.label === 'Work' ? '💼' : a.label === 'Home' ? '🏠' : '📍'} {t(`address.label.${a.label}`)}
               </button>
-              <button type="button" className="chip-x" aria-label={`Remove ${a.label}`} onClick={() => removeAddress(a._id)}>
+              <button type="button" className="chip-x" aria-label={t('address.removeLabel', { label: a.label })} onClick={() => removeAddress(a._id)}>
                 ×
               </button>
             </span>
@@ -96,17 +98,17 @@ const AddressPicker = ({ value, onChange }) => {
 
       <div className="row gap-8 wrap" style={{ marginBottom: 12 }}>
         <button type="button" className="btn btn-outline btn-sm" onClick={detect} disabled={locating}>
-          {locating ? '⏳ Locating…' : '📍 Use my location'}
+          {locating ? `⏳ ${t('address.locating')}` : `📍 ${t('address.useLocation')}`}
         </button>
         {Object.keys(CITIES).map((city) => (
           <button key={city} type="button" className="btn btn-ghost btn-sm" onClick={() => movePin(CITIES[city])}>
-            {city}
+            {t(`city.${city}`)}
           </button>
         ))}
       </div>
 
       <div className="input-group" style={{ position: 'relative' }}>
-        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search area, street or landmark…" aria-label="Search address" />
+        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t('address.search')} aria-label={t('address.search')} />
         {results.length > 0 && (
           <ul className="dropdown">
             {results.map((r) => (
@@ -130,20 +132,20 @@ const AddressPicker = ({ value, onChange }) => {
       {value && (
         <>
           <LocationPicker value={value} onChange={movePin} />
-          <p className="muted small" style={{ margin: '6px 0 12px' }}>Drag the pin or tap the map to the exact door.</p>
+          <p className="muted small" style={{ margin: '6px 0 12px' }}>{t('address.dragHint')}</p>
           <div className="input-group">
-            <label htmlFor="fullAddress">Full address (flat / house no., street, landmark)</label>
+            <label htmlFor="fullAddress">{t('address.full')}</label>
             <textarea id="fullAddress" rows={2} value={value.fullAddress} onChange={(e) => onChange({ ...value, fullAddress: e.target.value })} />
           </div>
           {!isSaved && value.fullAddress?.length > 4 && (
             <div className="row gap-8">
-              <select value={saveLabel} onChange={(e) => setSaveLabel(e.target.value)} aria-label="Address label" className="select-sm">
-                <option>Home</option>
-                <option>Work</option>
-                <option>Other</option>
+              <select value={saveLabel} onChange={(e) => setSaveLabel(e.target.value)} aria-label={t('address.labelAria')} className="select-sm">
+                <option value="Home">{t('address.label.Home')}</option>
+                <option value="Work">{t('address.label.Work')}</option>
+                <option value="Other">{t('address.label.Other')}</option>
               </select>
               <button type="button" className="btn btn-ghost btn-sm" onClick={saveAddress}>
-                💾 Save address
+                💾 {t('address.save')}
               </button>
             </div>
           )}

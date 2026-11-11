@@ -28,11 +28,11 @@ export const reverseGeocode = async ({ lat, lng }) => {
     const a = data.address || {};
     return {
       fullAddress: data.display_name || `${lat.toFixed(5)}, ${lng.toFixed(5)}`,
-      area: a.suburb || a.neighbourhood || a.city_district || a.village || a.town || a.city || 'Your location',
+      area: a.suburb || a.neighbourhood || a.city_district || a.village || a.town || a.city || '',
       city: a.city || a.town || a.county || '',
     };
   } catch {
-    return { fullAddress: `${lat.toFixed(5)}, ${lng.toFixed(5)}`, area: 'Your location', city: '' };
+    return { fullAddress: `${lat.toFixed(5)}, ${lng.toFixed(5)}`, area: '', city: '' };
   }
 };
 

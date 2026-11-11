@@ -2,13 +2,15 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import API, { errorMessage } from '../api';
 import { useCart } from '../context/CartContext';
-import { EmptyState, Loader, Stars, VegMark } from '../components/ui';
+import { EmptyState, FavButton, Loader, Stars, VegMark } from '../components/ui';
+import { useT } from '../i18n';
 import { FALLBACK_FOOD, FALLBACK_RESTAURANT, formatDateTime, rupees } from '../lib/format';
 
 const Restaurant = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const { addItem, removeItem, getItemQuantity, totalItems, subtotal, cart } = useCart();
+  const { t, locale } = useT();
 
   const [restaurant, setRestaurant] = useState(null);
   const [items, setItems] = useState([]);
@@ -35,12 +37,12 @@ const Restaurant = () => {
         setReviews(rv.data);
         setCoupons(c.data);
       })
-      .catch((e) => !cancelled && setError(errorMessage(e, 'Failed to load restaurant')))
+      .catch((e) => !cancelled && setError(errorMessage(e, t('restaurant.loadError'))))
       .finally(() => !cancelled && setLoading(false));
     return () => {
       cancelled = true;
     };
-  }, [id]);
+  }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const grouped = useMemo(() => {
     const g = {};
@@ -55,7 +57,7 @@ const Restaurant = () => {
   };
 
   if (loading) return <Loader />;
-  if (error || !restaurant) return <EmptyState emoji="😕" title={error || 'Restaurant not found'} />;
+  if (error || !restaurant) return <EmptyState emoji="😕" title={error || t('restaurant.notFound')} />;
 
   const cartIsHere = cart.restaurantId === restaurant._id;
 
@@ -64,21 +66,22 @@ const Restaurant = () => {
       <div className="banner">
         <img src={restaurant.image || FALLBACK_RESTAURANT} alt="" onError={(e) => { e.currentTarget.src = FALLBACK_RESTAURANT; }} />
         <div className="banner-shade" />
-        <button type="button" className="back-btn" onClick={() => navigate(-1)} aria-label="Go back">←</button>
+        <button type="button" className="back-btn" onClick={() => navigate(-1)} aria-label={t('common.back')}>←</button>
+        <FavButton restaurantId={restaurant._id} className="fav-on-banner" />
         <div className="banner-text">
           <h1>{restaurant.name}</h1>
           <div className="row gap-16 wrap small">
-            <span>⭐ {restaurant.totalRatings ? `${restaurant.rating.toFixed(1)} (${restaurant.totalRatings} ratings)` : 'New'}</span>
+            <span>⭐ {restaurant.totalRatings ? t('restaurant.ratings', { rating: restaurant.rating.toFixed(1), count: restaurant.totalRatings }) : t('common.new')}</span>
             <span>🕐 {restaurant.deliveryTime}</span>
-            <span>🚚 from {rupees(restaurant.deliveryFee)}</span>
-            <span>Min {rupees(restaurant.minimumOrder)}</span>
-            {restaurant.pureVeg && <span className="veg-pill">Pure veg</span>}
+            <span>🚚 {t('home.feeFrom', { fee: rupees(restaurant.deliveryFee) })}</span>
+            <span>{t('home.minOrder', { amount: rupees(restaurant.minimumOrder) })}</span>
+            {restaurant.pureVeg && <span className="veg-pill">{t('home.pureVeg')}</span>}
           </div>
           <div className="small" style={{ opacity: 0.85, marginTop: 4 }}>{restaurant.address}</div>
         </div>
       </div>
 
-      {!restaurant.isOpen && <div className="alert alert-error" style={{ borderRadius: 0 }}>This restaurant is closed right now — you can browse the menu, but ordering is paused.</div>}
+      {!restaurant.isOpen && <div className="alert alert-error" style={{ borderRadius: 0 }}>{t('restaurant.closed')}</div>}
 
       {(restaurant.offers?.length > 0 || coupons.length > 0) && (
         <div className="offers-strip">
@@ -92,9 +95,9 @@ const Restaurant = () => {
       )}
 
       <div className="menu-layout">
-        <aside className="menu-sidebar" aria-label="Menu categories">
+        <aside className="menu-sidebar" aria-label={t('restaurant.categories')}>
           <label className="toggle" style={{ padding: '0 20px 12px' }}>
-            <input type="checkbox" checked={vegOnly} onChange={(e) => setVegOnly(e.target.checked)} /> Veg only
+            <input type="checkbox" checked={vegOnly} onChange={(e) => setVegOnly(e.target.checked)} /> {t('restaurant.vegOnly')}
           </label>
           {categories.map((cat) => (
             <button type="button" key={cat} className={`cat-btn ${activeCategory === cat ? 'active' : ''}`} onClick={() => scrollTo(cat)}>
@@ -115,8 +118,8 @@ const Restaurant = () => {
                     <div className="menu-item-info">
                       <div className="row gap-8" style={{ marginBottom: 4 }}>
                         <VegMark veg={item.isVeg} />
-                        {item.isBestseller && <span className="bestseller-tag">⭐ Bestseller</span>}
-                        {!item.isAvailable && <span className="soldout-tag">Sold out</span>}
+                        {item.isBestseller && <span className="bestseller-tag">⭐ {t('restaurant.bestseller')}</span>}
+                        {!item.isAvailable && <span className="soldout-tag">{t('restaurant.soldOut')}</span>}
                       </div>
                       <h4>{item.name}</h4>
                       <p>{item.description}</p>
@@ -128,14 +131,14 @@ const Restaurant = () => {
                     <div className="menu-item-side">
                       <img src={item.image || FALLBACK_FOOD} alt="" loading="lazy" onError={(e) => { e.currentTarget.src = FALLBACK_FOOD; }} />
                       {!canAdd ? (
-                        <button type="button" className="btn btn-sm" disabled>Unavailable</button>
+                        <button type="button" className="btn btn-sm" disabled>{t('restaurant.unavailable')}</button>
                       ) : qty === 0 ? (
-                        <button type="button" className="btn btn-primary btn-sm" onClick={() => addItem(item, restaurant._id, restaurant.name)}>+ ADD</button>
+                        <button type="button" className="btn btn-primary btn-sm" onClick={() => addItem(item, restaurant._id, restaurant.name)}>+ {t('restaurant.add')}</button>
                       ) : (
                         <div className="counter">
-                          <button type="button" className="counter-btn" onClick={() => removeItem(item._id)} aria-label={`Remove one ${item.name}`}>−</button>
+                          <button type="button" className="counter-btn" onClick={() => removeItem(item._id)} aria-label={t('cart.removeOne', { name: item.name })}>−</button>
                           <span className="counter-num" aria-live="polite">{qty}</span>
-                          <button type="button" className="counter-btn" onClick={() => addItem(item, restaurant._id, restaurant.name)} aria-label={`Add one ${item.name}`}>+</button>
+                          <button type="button" className="counter-btn" onClick={() => addItem(item, restaurant._id, restaurant.name)} aria-label={t('cart.addOne', { name: item.name })}>+</button>
                         </div>
                       )}
                     </div>
@@ -145,12 +148,12 @@ const Restaurant = () => {
             </section>
           ))}
 
-          {categories.length === 0 && <EmptyState emoji="🍽️" title={vegOnly ? 'No veg items here' : 'No menu items yet'} />}
+          {categories.length === 0 && <EmptyState emoji="🍽️" title={vegOnly ? t('restaurant.noVeg') : t('restaurant.noItems')} />}
 
           <section className="menu-section">
-            <h2>Reviews</h2>
+            <h2>{t('restaurant.reviews')}</h2>
             {reviews.length === 0 ? (
-              <p className="muted" style={{ padding: '12px 24px' }}>No reviews yet — order and be the first!</p>
+              <p className="muted" style={{ padding: '12px 24px' }}>{t('restaurant.noReviews')}</p>
             ) : (
               reviews.map((r) => (
                 <div key={r._id} className="review">
@@ -159,7 +162,7 @@ const Restaurant = () => {
                     <Stars value={r.rating} size="1rem" />
                   </div>
                   {r.comment && <p>{r.comment}</p>}
-                  <span className="muted small">{formatDateTime(r.createdAt)}</span>
+                  <span className="muted small">{formatDateTime(r.createdAt, locale)}</span>
                 </div>
               ))
             )}
@@ -169,8 +172,8 @@ const Restaurant = () => {
 
       {totalItems > 0 && cartIsHere && (
         <button type="button" className="cart-bar" onClick={() => navigate('/cart')}>
-          <span>{totalItems} item{totalItems > 1 ? 's' : ''} | {rupees(subtotal)}</span>
-          <span>View Cart →</span>
+          <span>{t('cart.itemsTotal', { count: totalItems, total: rupees(subtotal) })}</span>
+          <span>{t('cart.view')} →</span>
         </button>
       )}
     </div>

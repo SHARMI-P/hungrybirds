@@ -7,9 +7,11 @@ const config = require('../config');
 const payments = require('./payments');
 const { assignNearestAgent, releaseAgent, populateOrder } = require('./dispatch');
 const { emitToOrder, emitToAdmins } = require('./realtime');
+const { RELEASE_BEFORE_MINS } = require('./schedule');
 
 const TRANSITIONS = {
-  awaiting_payment: ['placed', 'cancelled'],
+  awaiting_payment: ['placed', 'scheduled', 'cancelled'],
+  scheduled: ['placed', 'cancelled'],
   placed: ['confirmed', 'cancelled'],
   confirmed: ['preparing', 'cancelled'],
   preparing: ['picked_up', 'cancelled'],
@@ -18,7 +20,7 @@ const TRANSITIONS = {
   cancelled: [],
 };
 
-const CUSTOMER_CANCELLABLE = ['awaiting_payment', 'placed'];
+const CUSTOMER_CANCELLABLE = ['awaiting_payment', 'scheduled', 'placed'];
 
 const canTransition = (from, to) => (TRANSITIONS[from] || []).includes(to);
 
@@ -32,7 +34,10 @@ const assertAllowed = (order, to, actor) => {
   if (!canTransition(from, to)) {
     throw AppError.badRequest(`Cannot change order from "${from.replace('_', ' ')}" to "${to.replace('_', ' ')}"`);
   }
-  if (to === 'placed') throw AppError.forbidden('Orders are placed automatically once payment succeeds');
+  // Only an admin may release a scheduled order early; otherwise "placed" is set by the system.
+  if (to === 'placed' && !(from === 'scheduled' && actor.role === 'admin')) {
+    throw AppError.forbidden('Orders are placed automatically once payment succeeds');
+  }
 
   if (actor.role === 'admin') return;
 
@@ -98,6 +103,7 @@ const changeStatus = async (orderId, to, actor, { reason = '' } = {}) => {
   );
   if (!updated) throw AppError.conflict('Order was updated by someone else, please refresh');
 
+  if (to === 'placed') await assignNearestAgent(updated._id);
   if (to === 'delivered') await releaseAgent(updated.deliveryAgentId, { delivered: true });
   if (to === 'cancelled') {
     await releaseAgent(updated.deliveryAgentId);
@@ -121,19 +127,20 @@ const markOrderPaid = async (order, razorpayPaymentId) => {
     return refundIfPaid(paid);
   }
 
+  const next = order.scheduledFor ? 'scheduled' : 'placed';
   const updated = await Order.findOneAndUpdate(
     { _id: order._id, orderStatus: 'awaiting_payment' },
     {
-      $set: { paymentStatus: 'paid', razorpayPaymentId, orderStatus: 'placed' },
-      $push: { statusHistory: { status: 'placed', at: new Date(), by: 'system' } },
+      $set: { paymentStatus: 'paid', razorpayPaymentId, orderStatus: next },
+      $push: { statusHistory: { status: next, at: new Date(), by: 'system' } },
     },
     { new: true },
   );
   if (!updated) return Order.findById(order._id);
 
-  emitToAdmins('new_order', { orderId: updated._id, restaurantId: updated.restaurantId });
+  emitToAdmins('new_order', { orderId: updated._id, restaurantId: updated.restaurantId, scheduledFor: updated.scheduledFor });
   broadcast(updated);
-  await assignNearestAgent(updated._id);
+  if (next === 'placed') await assignNearestAgent(updated._id);
   return Order.findById(updated._id);
 };
 
@@ -149,8 +156,31 @@ const agentIdForUser = async (user) => {
   return agent?._id || null;
 };
 
+// Move scheduled orders to the kitchen when their slot is near (runs every minute).
+const releaseDueScheduledOrders = async (now = new Date()) => {
+  const due = await Order.find({
+    orderStatus: 'scheduled',
+    scheduledFor: { $lte: new Date(now.getTime() + RELEASE_BEFORE_MINS * 60 * 1000) },
+  }).select('_id');
+  let released = 0;
+  for (const { _id } of due) {
+    const order = await Order.findOneAndUpdate(
+      { _id, orderStatus: 'scheduled' },
+      { $set: { orderStatus: 'placed' }, $push: { statusHistory: { status: 'placed', at: new Date(), by: 'system' } } },
+      { new: true },
+    );
+    if (!order) continue;
+    released += 1;
+    broadcast(order);
+    emitToAdmins('new_order', { orderId: order._id, restaurantId: order.restaurantId, released: true });
+    await assignNearestAgent(order._id);
+  }
+  return released;
+};
+
 module.exports = {
   TRANSITIONS,
+  releaseDueScheduledOrders,
   canTransition,
   changeStatus,
   markOrderPaid,

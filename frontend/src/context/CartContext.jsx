@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
+import { useT } from '../i18n';
 
 const CartContext = createContext(null);
 const KEY = 'hungrybirds_cart';
@@ -17,6 +18,7 @@ const load = () => {
 // The cart stores what to display; prices shown here are only a preview.
 // The real bill always comes from the server (/orders/quote).
 export const CartProvider = ({ children }) => {
+  const { t } = useT();
   const [cart, setCart] = useState(load);
 
   useEffect(() => {
@@ -26,9 +28,9 @@ export const CartProvider = ({ children }) => {
   const addItem = (item, restaurantId, restaurantName) => {
     if (cart.restaurantId && cart.restaurantId !== restaurantId && cart.items.length > 0) {
        
-      if (!window.confirm(`Your cart has items from ${cart.restaurantName}. Clear it and add this item?`)) return;
+      if (!window.confirm(t('cart.switchConfirm', { name: cart.restaurantName }))) return;
       setCart({ restaurantId, restaurantName, items: [{ ...pick(item), quantity: 1 }] });
-      toast.success('Cart updated!');
+      toast.success(t('cart.updated'));
       return;
     }
     setCart((prev) => {
@@ -38,7 +40,7 @@ export const CartProvider = ({ children }) => {
         : [...prev.items, { ...pick(item), quantity: 1 }];
       return { restaurantId, restaurantName, items };
     });
-    if (!cart.items.some((i) => i._id === item._id)) toast.success(`${item.name} added 🛒`, { id: 'cart-add' });
+    if (!cart.items.some((i) => i._id === item._id)) toast.success(t('cart.added', { name: item.name }), { id: 'cart-add' });
   };
 
   const removeItem = (itemId) =>
@@ -66,7 +68,7 @@ export const CartProvider = ({ children }) => {
     const subtotal = cart.items.reduce((s, i) => s + i.price * i.quantity, 0);
     const lines = cart.items.map((i) => ({ menuItemId: i._id, quantity: i.quantity }));
     return { cart, lines, totalItems, subtotal, addItem, removeItem, dropItem, clearCart, replaceCart, getItemQuantity };
-  }, [cart]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [cart, t]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>;
 };

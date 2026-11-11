@@ -10,10 +10,12 @@ import Riders from './pages/Riders';
 import Coupons from './pages/Coupons';
 
 const Dashboard = lazy(() => import('./pages/Dashboard')); // recharts only loads here
+const LiveMap = lazy(() => import('./pages/LiveMap')); // leaflet only loads here
 
 const TABS = [
   { to: '/dashboard', label: '📊 Dashboard' },
   { to: '/orders', label: '📦 Orders' },
+  { to: '/live', label: '🗺️ Live map' },
   { to: '/restaurants', label: '🏪 Restaurants' },
   { to: '/menu', label: '🍽️ Menu' },
   { to: '/riders', label: '🛵 Riders' },
@@ -81,6 +83,7 @@ const AdminApp = () => {
             <Routes>
               <Route path="/dashboard" element={<Suspense fallback={<p className="muted">Loading…</p>}><Dashboard /></Suspense>} />
               <Route path="/orders" element={<Orders />} />
+              <Route path="/live" element={<Suspense fallback={<p className="muted">Loading map…</p>}><LiveMap /></Suspense>} />
               <Route path="/restaurants" element={<Restaurants />} />
               <Route path="/menu" element={<Menu />} />
               <Route path="/riders" element={<Riders />} />

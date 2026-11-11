@@ -21,6 +21,12 @@ const schema = z.object({
   CLOUDINARY_API_KEY: z.string().optional(),
   CLOUDINARY_API_SECRET: z.string().optional(),
 
+  // Phone OTP login: off | demo (code shown on screen, no SMS) | twilio (real SMS via Twilio Verify)
+  OTP_PROVIDER: z.enum(['off', 'demo', 'twilio']).optional(),
+  TWILIO_ACCOUNT_SID: z.string().optional(),
+  TWILIO_AUTH_TOKEN: z.string().optional(),
+  TWILIO_VERIFY_SERVICE_SID: z.string().optional(),
+
   GST_PERCENT: z.coerce.number().default(5),
   MAX_DELIVERY_KM: z.coerce.number().default(15),
 });
@@ -33,6 +39,12 @@ if (!parsed.success) {
 }
 
 const env = parsed.data;
+// Demo OTP is on by default in development, off in production unless chosen explicitly.
+env.OTP_PROVIDER ??= env.NODE_ENV === 'production' ? 'off' : 'demo';
+if (env.OTP_PROVIDER === 'twilio' && !(env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN && env.TWILIO_VERIFY_SERVICE_SID)) {
+  console.error('❌ OTP_PROVIDER=twilio needs TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN and TWILIO_VERIFY_SERVICE_SID');
+  process.exit(1);
+}
 
 module.exports = {
   ...env,

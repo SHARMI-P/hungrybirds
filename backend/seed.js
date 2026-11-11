@@ -9,6 +9,7 @@ const MenuItem = require('./models/MenuItem');
 const DeliveryAgent = require('./models/DeliveryAgent');
 const Order = require('./models/Order');
 const Coupon = require('./models/Coupon');
+const { addMoreRestaurants } = require('./scripts/add-restaurants');
 
 if (config.isProd && process.env.SEED_ALLOW_PRODUCTION !== 'true') {
   console.error('Refusing to wipe a production database. Set SEED_ALLOW_PRODUCTION=true if you really mean it.');
@@ -128,6 +129,8 @@ const seed = async () => {
       { restaurantId:sweetcravings._id, name:'Gulab Jamun (4 pcs)',            description:'Soft milk solid balls soaked in sugar syrup',            price:60,  image:'https://res.cloudinary.com/dzx9gfdeo/image/upload/v1773301665/soft-gulab-jamun-recipe-for-raksha-bandhan-from-dough-to-syrup-all-you-need-to-know_u5evtg.webp',                           category:'Desserts',  isVeg:true,  isBestseller:false },
     ]);
     console.log('✅ 67 Menu items created');
+    const more = await addMoreRestaurants({ ownerId: admin._id });
+    console.log(`✅ ${more.added} more restaurants with ${more.dishes} dishes`);
 
     const riders = [
       { name:'Raju K',   phone:'9111111111', email:'raju@hb.com',   vehicleType:'bike',    vehicleNumber:'KA25AB1234', isOnline:true,  rating:4.8, totalDeliveries:245, lat:15.4589, lng:75.0078 },

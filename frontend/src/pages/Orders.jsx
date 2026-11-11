@@ -3,10 +3,12 @@ import { Link, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import API, { errorMessage } from '../api';
 import { useCart } from '../context/CartContext';
+import { useT } from '../i18n';
 import { EmptyState, Loader } from '../components/ui';
-import { FALLBACK_RESTAURANT, formatDateTime, rupees, statusLabel } from '../lib/format';
+import { FALLBACK_RESTAURANT, formatDateTime, formatSlot, rupees, statusLabel } from '../lib/format';
 
 const Orders = () => {
+  const { t, locale } = useT();
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const { replaceCart } = useCart();
@@ -23,7 +25,7 @@ const Orders = () => {
   const reorder = (order) => {
     const restaurantId = order.restaurantId?._id || order.restaurantId;
     replaceCart(restaurantId, order.restaurantName, order.items.map((i) => ({ ...i, _id: i.menuItemId })));
-    toast.success('Items added to your cart');
+    toast.success(t('orders.reordered'));
     navigate('/cart');
   };
 
@@ -31,11 +33,11 @@ const Orders = () => {
 
   return (
     <div className="page-container narrow">
-      <h1 className="section-title">My Orders</h1>
+      <h1 className="section-title">{t('nav.myOrders')}</h1>
       {orders.length === 0 ? (
-        <EmptyState emoji="📦" title="No orders yet">
-          <p>Your past orders will appear here</p>
-          <Link to="/" className="btn btn-primary" style={{ marginTop: 24 }}>Order Food</Link>
+        <EmptyState emoji="📦" title={t('orders.none')}>
+          <p>{t('orders.noneHint')}</p>
+          <Link to="/" className="btn btn-primary" style={{ marginTop: 24 }}>{t('orders.orderFood')}</Link>
         </EmptyState>
       ) : (
         <div className="stack gap-16">
@@ -46,15 +48,17 @@ const Orders = () => {
                 <div>
                   <h4>{order.restaurantName}</h4>
                   <p className="muted small">{order.items.map((i) => `${i.name} × ${i.quantity}`).join(', ')}</p>
-                  <p className="muted small">{formatDateTime(order.createdAt)} · {rupees(order.finalAmount)}</p>
+                  <p className="muted small">
+                    {order.scheduledFor ? `🗓️ ${formatSlot(order.scheduledFor, locale)}` : formatDateTime(order.createdAt, locale)} · {rupees(order.finalAmount)}
+                  </p>
                 </div>
               </Link>
               <div className="order-actions">
-                <span className={`status-pill status-${order.orderStatus}`}>{statusLabel(order.orderStatus)}</span>
+                <span className={`status-pill status-${order.orderStatus}`}>{statusLabel(order.orderStatus, t)}</span>
                 {['delivered', 'cancelled'].includes(order.orderStatus) ? (
-                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => reorder(order)}>↻ Reorder</button>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => reorder(order)}>↻ {t('orders.reorder')}</button>
                 ) : (
-                  <Link to={`/order/${order._id}`} className="link bold small">Track →</Link>
+                  <Link to={`/order/${order._id}`} className="link bold small">{t('orders.track')} →</Link>
                 )}
               </div>
             </div>

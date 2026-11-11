@@ -100,4 +100,41 @@ router.get(
   },
 );
 
+// @GET /api/admin/live — riders + active orders for the live map
+router.get('/live', protect, adminOnly, async (req, res) => {
+  const [agents, orders] = await Promise.all([
+    DeliveryAgent.find({}, 'name phone vehicleType isOnline isAvailable currentOrderId location lastLocationAt'),
+    Order.find({ orderStatus: { $in: ['placed', 'confirmed', 'preparing', 'picked_up'] } })
+      .select('restaurantName orderStatus deliveryAddress deliveryAgentId restaurantId finalAmount createdAt')
+      .populate('restaurantId', 'name location')
+      .sort({ createdAt: -1 })
+      .limit(200),
+  ]);
+  res.json({
+    agents: agents
+      .filter((a) => a.location?.coordinates && (a.location.coordinates[0] || a.location.coordinates[1]))
+      .map((a) => ({
+        _id: a._id,
+        name: a.name,
+        phone: a.phone,
+        vehicleType: a.vehicleType,
+        isOnline: a.isOnline,
+        isAvailable: a.isAvailable,
+        currentOrderId: a.currentOrderId,
+        lat: a.location.coordinates[1],
+        lng: a.location.coordinates[0],
+        lastLocationAt: a.lastLocationAt,
+      })),
+    orders: orders.map((o) => ({
+      _id: o._id,
+      restaurantName: o.restaurantName,
+      status: o.orderStatus,
+      finalAmount: o.finalAmount,
+      agentId: o.deliveryAgentId,
+      restaurant: o.restaurantId?.location ? { lat: o.restaurantId.location.coordinates[1], lng: o.restaurantId.location.coordinates[0] } : null,
+      home: { lat: o.deliveryAddress.lat, lng: o.deliveryAddress.lng, address: o.deliveryAddress.fullAddress },
+    })),
+  });
+});
+
 module.exports = router;

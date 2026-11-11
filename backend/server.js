@@ -4,6 +4,7 @@ const config = require('./config');
 const app = require('./app');
 const { attachSocket } = require('./socket');
 const { expireStaleCheckouts } = require('./services/maintenance');
+const { releaseDueScheduledOrders } = require('./services/orderLifecycle');
 
 const start = async () => {
   await mongoose.connect(config.MONGODB_URI);
@@ -17,9 +18,13 @@ const start = async () => {
   // Cancel checkouts that were never paid, every 5 minutes.
   const timer = setInterval(() => expireStaleCheckouts().catch((e) => console.error('expiry job:', e.message)), 5 * 60 * 1000);
 
+  // Send scheduled orders to the kitchen on time, every minute.
+  const scheduler = setInterval(() => releaseDueScheduledOrders().catch((e) => console.error('scheduler:', e.message)), 60 * 1000);
+
   const shutdown = async (signal) => {
     console.log(`\n${signal} received, shutting down…`);
     clearInterval(timer);
+    clearInterval(scheduler);
     io.close();
     server.close();
     await mongoose.disconnect();

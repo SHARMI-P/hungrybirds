@@ -1,10 +1,12 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
 import API, { STORAGE_KEY, errorMessage, getStoredUser, setUnauthorizedHandler } from '../api';
+import { useT } from '../i18n';
 
 const AuthContext = createContext(null);
 
 export const AuthProvider = ({ children }) => {
+  const { t } = useT();
   const [user, setUser] = useState(getStoredUser);
 
   const save = useCallback((data) => {
@@ -13,38 +15,47 @@ export const AuthProvider = ({ children }) => {
     else localStorage.removeItem(STORAGE_KEY);
   }, []);
 
+  const patch = useCallback((fields) => save({ ...getStoredUser(), ...fields }), [save]);
+
   const logout = useCallback(
-    (message = 'Logged out successfully') => {
+    (message = t('auth.loggedOut')) => {
       save(null);
       if (message) toast.success(message);
     },
-    [save],
+    [save, t],
   );
 
   // If the token expires or the account is removed, sign out cleanly.
   useEffect(() => {
     setUnauthorizedHandler(() => {
       save(null);
-      toast.error('Your session expired. Please log in again.');
+      toast.error(t('auth.sessionExpired'));
     });
-  }, [save]);
+  }, [save, t]);
 
-  // Refresh profile (role, addresses) on load so stale localStorage can't lie.
+  // Refresh profile (role, addresses, favourites) on load so stale localStorage can't lie.
   useEffect(() => {
     if (!getStoredUser()?.token) return;
     API.get('/auth/me')
-      .then(({ data }) => save({ ...getStoredUser(), ...data }))
+      .then(({ data }) => patch(data))
       .catch(() => {});
-  }, [save]);
+  }, [patch]);
+
+  const welcome = (data) => toast.success(t('auth.welcome', { name: data.name.split(' ')[0] }));
+
+  // Used by email login and the phone-OTP flow.
+  const startSession = (data) => {
+    save(data);
+    welcome(data);
+    return data;
+  };
 
   const login = async (email, password) => {
     try {
       const { data } = await API.post('/auth/login', { email, password });
-      save(data);
-      toast.success(`Welcome back, ${data.name.split(' ')[0]}! 🐦`);
-      return { success: true, user: data };
+      return { success: true, user: startSession(data) };
     } catch (error) {
-      const message = errorMessage(error, 'Login failed');
+      const message = errorMessage(error, t('auth.loginFailed'));
       toast.error(message);
       return { success: false, message };
     }
@@ -53,20 +64,39 @@ export const AuthProvider = ({ children }) => {
   const register = async (form) => {
     try {
       const { data } = await API.post('/auth/register', form);
-      save(data);
-      toast.success(`Account created! Welcome ${data.name.split(' ')[0]} 🎉`);
+      startSession(data);
       return { success: true };
     } catch (error) {
       const fieldErrors = Object.fromEntries((error.response?.data?.errors || []).map((e) => [e.field, e.message]));
-      const message = errorMessage(error, 'Registration failed');
+      const message = errorMessage(error, t('auth.registerFailed'));
       if (!Object.keys(fieldErrors).length) toast.error(message);
       return { success: false, message, fieldErrors };
     }
   };
 
-  const setAddresses = (addresses) => save({ ...getStoredUser(), addresses });
+  const setAddresses = (addresses) => patch({ addresses });
 
-  const value = useMemo(() => ({ user, login, register, logout, setAddresses }), [user, logout]); // eslint-disable-line react-hooks/exhaustive-deps
+  const isFavorite = (restaurantId) => Boolean(user?.favorites?.some((id) => String(id) === String(restaurantId)));
+
+  const toggleFavorite = async (restaurantId) => {
+    if (!user) {
+      toast(t('fav.loginFirst'), { icon: '❤️' });
+      return;
+    }
+    const fav = isFavorite(restaurantId);
+    try {
+      const { data } = fav ? await API.delete(`/auth/favorites/${restaurantId}`) : await API.post(`/auth/favorites/${restaurantId}`);
+      patch({ favorites: data });
+      toast.success(fav ? t('fav.removed') : t('fav.added'), { id: 'fav' });
+    } catch (e) {
+      toast.error(errorMessage(e));
+    }
+  };
+
+  const value = useMemo(
+    () => ({ user, login, register, logout, setAddresses, startSession, isFavorite, toggleFavorite }),
+    [user, logout, t], // eslint-disable-line react-hooks/exhaustive-deps
+  );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
 

@@ -2,10 +2,11 @@ import { useCallback, useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import api, { createSocket, errorMessage } from '../api';
 
-const STATUSES = ['placed', 'confirmed', 'preparing', 'picked_up', 'delivered', 'cancelled'];
+const STATUSES = ['scheduled', 'placed', 'confirmed', 'preparing', 'picked_up', 'delivered', 'cancelled'];
 // Mirrors the server's state machine so the UI only offers valid moves.
-const NEXT = { placed: ['confirmed', 'cancelled'], confirmed: ['preparing', 'cancelled'], preparing: ['picked_up', 'cancelled'], picked_up: ['delivered'] };
+const NEXT = { scheduled: ['placed', 'cancelled'], placed: ['confirmed', 'cancelled'], confirmed: ['preparing', 'cancelled'], preparing: ['picked_up', 'cancelled'], picked_up: ['delivered'] };
 const LABEL = { picked_up: 'Out for delivery' };
+const ACTION = { placed: 'Release now', confirmed: 'Confirm', preparing: 'Start preparing' };
 const label = (s) => LABEL[s] || s.charAt(0).toUpperCase() + s.slice(1);
 const inr = (n) => `₹${Number(n).toLocaleString('en-IN')}`;
 
@@ -97,10 +98,15 @@ const Orders = () => {
                   </div>
                 </button>
                 <div className="row gap-8 wrap">
+                  {o.scheduledFor && (
+                    <span className="pill pill-scheduled" title="Scheduled delivery time">
+                      🗓️ {new Date(o.scheduledFor).toLocaleString('en-IN', { weekday: 'short', hour: 'numeric', minute: '2-digit' })}
+                    </span>
+                  )}
                   <span className={`pill pill-${o.orderStatus}`}>{label(o.orderStatus)}</span>
                   {(NEXT[o.orderStatus] || []).filter((n) => n !== 'picked_up' && n !== 'delivered').map((n) => (
                     <button type="button" key={n} className={`btn btn-sm ${n === 'cancelled' ? 'btn-danger' : 'btn-primary'}`} onClick={() => move(o._id, n)}>
-                      {n === 'cancelled' ? 'Cancel' : `→ ${label(n)}`}
+                      {n === 'cancelled' ? 'Cancel' : `→ ${ACTION[n] || label(n)}`}
                     </button>
                   ))}
                 </div>

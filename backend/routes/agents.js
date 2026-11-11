@@ -59,6 +59,7 @@ router.put('/me/location', protect, requireRole('agent'), validate({ body: z.obj
   agent.location = { type: 'Point', coordinates: [req.body.lng, req.body.lat] };
   agent.lastLocationAt = new Date();
   await agent.save();
+  emitToAdmins('agent_location', { agentId: agent._id, lat: req.body.lat, lng: req.body.lng, at: agent.lastLocationAt });
   if (agent.currentOrderId) {
     emitToOrder(agent.currentOrderId, 'location_update', { lat: req.body.lat, lng: req.body.lng, at: agent.lastLocationAt });
   } else if (agent.isOnline) {

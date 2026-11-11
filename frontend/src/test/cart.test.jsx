@@ -1,10 +1,11 @@
 import { describe, expect, test, vi } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
 import { CartProvider, useCart } from '../context/CartContext';
+import { LanguageProvider } from '../i18n';
 
 vi.mock('react-hot-toast', () => ({ default: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
 
-const wrapper = ({ children }) => <CartProvider>{children}</CartProvider>;
+const wrapper = ({ children }) => <LanguageProvider><CartProvider>{children}</CartProvider></LanguageProvider>;
 const dosa = { _id: 'm1', name: 'Dosa', price: 60, isVeg: true, image: '' };
 const coffee = { _id: 'm2', name: 'Coffee', price: 30, isVeg: true, image: '' };
 

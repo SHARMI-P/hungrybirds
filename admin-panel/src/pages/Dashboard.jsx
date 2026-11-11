@@ -11,7 +11,7 @@ const AXIS = { fontSize: 12, fill: '#6B7280' };
 
 const inr = (n) => `₹${Math.round(n).toLocaleString('en-IN')}`;
 const day = (d) => new Date(`${d}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
-const STATUS_LABEL = { placed: 'Placed', confirmed: 'Confirmed', preparing: 'Preparing', picked_up: 'Out for delivery', delivered: 'Delivered', cancelled: 'Cancelled' };
+const STATUS_LABEL = { scheduled: 'Scheduled', placed: 'Placed', confirmed: 'Confirmed', preparing: 'Preparing', picked_up: 'Out for delivery', delivered: 'Delivered', cancelled: 'Cancelled' };
 
 const Tile = ({ label, value, sub }) => (
   <div className="tile">

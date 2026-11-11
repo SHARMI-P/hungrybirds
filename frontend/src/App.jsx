@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { AuthProvider } from './context/AuthContext';
+import { LanguageProvider, useT } from './i18n';
 import { CartProvider } from './context/CartContext';
 import Navbar from './components/Navbar';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -18,14 +19,18 @@ const Checkout = lazy(() => import('./pages/Checkout'));
 const OrderTracking = lazy(() => import('./pages/OrderTracking'));
 const Rider = lazy(() => import('./pages/Rider'));
 
-const NotFound = () => (
-  <EmptyState emoji="🧭" title="Page not found">
-    <p>That page flew away.</p>
-  </EmptyState>
-);
+const NotFound = () => {
+  const { t } = useT();
+  return (
+    <EmptyState emoji="🧭" title={t('notFound.title')}>
+      <p>{t('notFound.body')}</p>
+    </EmptyState>
+  );
+};
 
 function App() {
   return (
+    <LanguageProvider>
     <AuthProvider>
       <CartProvider>
         <Router>
@@ -51,6 +56,7 @@ function App() {
         </Router>
       </CartProvider>
     </AuthProvider>
+    </LanguageProvider>
   );
 }
 

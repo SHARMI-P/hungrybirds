@@ -13,6 +13,8 @@ const { changeStatus, agentIdForUser } = require('../services/orderLifecycle');
 const { assignNearestAgent, populateOrder, releaseAgent } = require('../services/dispatch');
 const { emitToAdmins, emitToAgent, emitToOrder } = require('../services/realtime');
 const { ORDER_STATUSES } = require('../models/Order');
+const Message = require('../models/Message');
+const { validateSchedule } = require('../services/schedule');
 
 const router = express.Router();
 
@@ -30,6 +32,7 @@ const quoteBody = z.object({ ...cartSchema, deliveryLocation: z.object({ lat, ln
 const createBody = z.object({
   ...cartSchema,
   paymentMethod: z.enum(['razorpay', 'cod']),
+  scheduledFor: z.coerce.date().optional(),
   deliveryAddress: z.object({ fullAddress: z.string().trim().min(5).max(300), lat, lng }),
 });
 
@@ -55,6 +58,7 @@ router.post('/quote', protect, validate({ body: quoteBody }), async (req, res) =
 // @POST /api/orders — place an order. Totals are always recomputed on the server.
 router.post('/', protect, validate({ body: createBody }), async (req, res) => {
   const { restaurantId, items, couponCode, deliveryAddress, paymentMethod } = req.body;
+  const scheduledFor = validateSchedule(req.body.scheduledFor);
   const quote = await quoteOrder({
     restaurantId,
     items,
@@ -78,17 +82,20 @@ router.post('/', protect, validate({ body: createBody }), async (req, res) => {
     estimatedDelivery: quote.estimatedDelivery,
     deliveryAddress,
     paymentMethod,
+    scheduledFor,
+    ...(scheduledFor && { estimatedDelivery: `Scheduled` }),
   };
 
   if (paymentMethod === 'cod') {
+    const status = scheduledFor ? 'scheduled' : 'placed';
     const order = await Order.create({
       ...base,
       paymentStatus: 'pending',
-      orderStatus: 'placed',
-      statusHistory: [{ status: 'placed', by: 'customer' }],
+      orderStatus: status,
+      statusHistory: [{ status, by: 'customer' }],
     });
-    emitToAdmins('new_order', { orderId: order._id, restaurantId: order.restaurantId });
-    await assignNearestAgent(order._id);
+    emitToAdmins('new_order', { orderId: order._id, restaurantId: order.restaurantId, scheduledFor });
+    if (status === 'placed') await assignNearestAgent(order._id);
     return res.status(201).json({ order: await populateOrder(Order.findById(order._id)) });
   }
 
@@ -251,6 +258,39 @@ router.post(
       },
     ]);
     res.status(201).json(order);
+  },
+);
+
+// ───────────── Customer ↔ rider chat ─────────────
+
+const CHAT_STATUSES = ['placed', 'confirmed', 'preparing', 'picked_up'];
+
+// @GET /api/orders/:id/messages
+router.get('/:id/messages', protect, validate({ params: idParams }), async (req, res) => {
+  await loadOrderFor(req.params.id, req.user);
+  const messages = await Message.find({ orderId: req.params.id }).sort({ createdAt: 1 }).limit(200);
+  res.json(messages);
+});
+
+// @POST /api/orders/:id/messages — owner or assigned rider, while the order is active
+router.post(
+  '/:id/messages',
+  protect,
+  validate({ params: idParams, body: z.object({ text: z.string().trim().min(1, 'Message is empty').max(500) }) }),
+  async (req, res) => {
+    const order = await loadOrderFor(req.params.id, req.user);
+    if (!order.deliveryAgentId) throw AppError.badRequest('Chat opens once a rider is assigned');
+    if (!CHAT_STATUSES.includes(order.orderStatus)) throw AppError.badRequest('Chat is closed for this order');
+    const role = req.user.role === 'agent' ? 'agent' : req.user.role === 'admin' ? 'admin' : 'customer';
+    const message = await Message.create({
+      orderId: order._id,
+      senderId: req.user._id,
+      senderRole: role,
+      senderName: req.user.name.split(' ')[0],
+      text: req.body.text,
+    });
+    emitToOrder(order._id, 'chat_message', message);
+    res.status(201).json(message);
   },
 );
 

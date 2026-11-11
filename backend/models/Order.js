@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 
-const ORDER_STATUSES = ['awaiting_payment', 'placed', 'confirmed', 'preparing', 'picked_up', 'delivered', 'cancelled'];
+const ORDER_STATUSES = ['awaiting_payment', 'scheduled', 'placed', 'confirmed', 'preparing', 'picked_up', 'delivered', 'cancelled'];
 const PAYMENT_STATUSES = ['pending', 'paid', 'failed', 'refund_pending', 'refunded'];
 
 const orderItemSchema = new mongoose.Schema(
@@ -48,6 +48,7 @@ const orderSchema = new mongoose.Schema(
       lng: { type: Number, required: true },
     },
     estimatedDelivery: { type: String, default: '30-45 mins' },
+    scheduledFor: { type: Date, default: null, index: true }, // "deliver at 1 pm" orders
     deliveredAt: { type: Date },
 
     review: {
